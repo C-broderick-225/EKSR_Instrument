@@ -15,8 +15,7 @@ The display looks like this: (sorry for bad reflections, I'll try get better pho
 ![Display](/media/EKSR_display.jpg)
 
 
-Here is a small movie:
-![Movie](/media/EKSR_movie.mp4)
+I've included a very short movie of the display in action, but it cannot be shown here on GitHub. You'll find it in the `/media` folder.
 
 
 And finally the bike it's installed on:
