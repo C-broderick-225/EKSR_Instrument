@@ -10,7 +10,7 @@ To setup the correct display driver and GPIOs used, you need to edit the **`User
 Change the line that says:\
 `  #include <User_Setup.h>                 // Default setup is root library folder`\
 to:\
-`  #include <User_Setups/Setup400_EKSR.h>  // Setup file for ESP32-S3 configured for ILI9341`\
+`  #include <User_Setups/Setup400_EKSR.h>  // Setup file for ESP32-S3 configured for ILI9341`
 
 Then copy the Setup400_EKSR.h file to the **`Arduino/libraries/TFT_eSPI/User_Setups`** folder.
 
