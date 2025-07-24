@@ -391,12 +391,10 @@ void setup() {
   // setup PWM output on GPIO9
   pinMode(9, OUTPUT);
   digitalWrite(9, HIGH);
-  // configure LED PWM functionalitites
-  ledcSetup(0, 5000, 8);
-  // attach the pin at 5kHz, 8 bit
-  ledcAttachPin(9, 0);
-  //set duty cycle
-  ledcWrite(0, 100);
+  // configure LED PWM functionalities (Arduino-ESP32 3.0+ syntax)
+  ledcAttachChannel(9, 5000, 8, 0); // pin, freq, resolution, channel
+  // set duty cycle (0-255 for 8 bits)
+  ledcWrite(9, 100);
 
 
   Serial.println("Started");
