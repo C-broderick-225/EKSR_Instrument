@@ -172,18 +172,18 @@ void setup_ble_advertising() {
     // Configure advertising data
     NimBLEAdvertisementData advData;
     advData.setName(DEVICE_NAME);
-    advData.setCompleteServices(NimBLEUUID(NUS_SERVICE_UUID));
+    advData.addServiceUUID(FARDIVER_SERVICE_UUID);
     pAdvertising->setAdvertisementData(advData);
     
     // Configure scan response
     NimBLEAdvertisementData scanResponseData;
     scanResponseData.setName(DEVICE_NAME);
+    scanResponseData.addServiceUUID(NUS_SERVICE_UUID);
     pAdvertising->setScanResponseData(scanResponseData);
     
     // Set advertising parameters
     pAdvertising->setMinInterval(0x20); // 20ms
     pAdvertising->setMaxInterval(0x40); // 40ms
-    pAdvertising->addServiceUUID(NUS_SERVICE_UUID);
     
     pAdvertising->start();
 }
