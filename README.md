@@ -1,4 +1,10 @@
-# EKSR_Instrument
+# EKSR_Instrument (Fork)
+
+**This repository is a fork of the original [EKSR_Instrument](https://github.com/original-author/EKSR_Instrument) project.**
+
+This fork is being developed as the foundation for a new product that will rely heavily on the original EKSR_Instrument hardware and firmware. All credit for the initial design and implementation goes to the original author. This fork will introduce new features, modifications, and documentation specific to the goals of the new product.
+
+---
 
 Documentation on hardware and firmware for EKSR Instrument, a TFT display for FarDriver Motor Controllers
 
