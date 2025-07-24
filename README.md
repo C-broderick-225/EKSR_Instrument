@@ -20,5 +20,14 @@ The ESP32-S3 (including the ESP32-S3-WROOM-1 module) is capable of acting as bot
 ## Purpose
 The goal of this fork is to extend and adapt the original EKSR_Instrument platform for new applications and features. All original design and implementation credit belongs to the original author. This repository will introduce new features, modifications, and documentation specific to the goals of the new product.
 
+## FarDriver BLE Emulator
+A FarDriver BLE emulator is included in the `emulator/` directory. This tool allows you to use an ESP32 (such as ESP-WROVER-E) as a BLE peripheral that mimics the FarDriver controller. It is useful for testing the EKSR Instrument firmware without requiring the actual controller hardware.
+
+- The emulator advertises the same BLE service and characteristic UUIDs as the real controller.
+- It sends realistic, cyclic data packets for rpm, voltage, temperature, throttle, and more.
+- The EKSR Instrument client can connect and display the emulated data as if it were connected to a real FarDriver controller.
+
+For build instructions, customization, and protocol details, see [`emulator/README.md`](emulator/README.md).
+
 ## License
 See the LICENSE file for details.
