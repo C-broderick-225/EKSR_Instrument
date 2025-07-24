@@ -31,7 +31,6 @@ NimBLECharacteristic* pFarDriverCharacteristic = nullptr;
 NimBLECharacteristic* pNusTxCharacteristic = nullptr;
 NimBLECharacteristic* pNusRxCharacteristic = nullptr;
 bool deviceConnected = false;
-bool dataTransmissionEnabled = false;  // Control data transmission
 unsigned long lastBlinkTime = 0;
 bool ledState = false;
 
