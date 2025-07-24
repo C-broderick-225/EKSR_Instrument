@@ -67,7 +67,7 @@ This directory contains a comprehensive BLE emulator for the FarDriver controlle
 1. Power up the ESP32 running this emulator
 2. Watch the LED blink while advertising
 3. Start the EKSR Instrument client (ESP32-S3-WROOM-1 with the original firmware)
-4. The client should connect and the LED will turn solid ON
+4. The client should connect and the LED will turn solid ON <----this is not working for some reason
 5. Monitor Serial output to see packet transmission and connection status
 6. The client will display the emulated data as if connected to a real FarDriver controller
 
