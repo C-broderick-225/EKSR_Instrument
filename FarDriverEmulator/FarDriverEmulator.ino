@@ -43,7 +43,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer* pServer, ble_gap_conn_desc* desc) {
         Serial.println("[Emulator] onConnect callback triggered");
         deviceConnected = true;
-        digitalWrite(LED_PIN, HIGH);
+        // Don't set LED here - let the loop() handle it
         Serial.println("[Emulator] Device connected");
         Serial.printf("[Emulator] Client: %02X:%02X:%02X:%02X:%02X:%02X\n", 
             desc->peer_ota_addr.val[5], desc->peer_ota_addr.val[4], desc->peer_ota_addr.val[3],
@@ -54,7 +54,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     void onDisconnect(NimBLEServer* pServer) {
         Serial.println("[Emulator] onDisconnect callback triggered");
         deviceConnected = false;
-        digitalWrite(LED_PIN, LOW);
+        // Don't set LED here - let the loop() handle it
         Serial.println("[Emulator] Device disconnected");
     }
     
@@ -233,7 +233,7 @@ void loop() {
         if (pServer && pServer->getConnectedCount() > 0) {
             if (!deviceConnected) {
                 deviceConnected = true;
-                digitalWrite(LED_PIN, HIGH);
+                // digitalWrite(LED_PIN, HIGH); // Let the centralized logic handle the LED
                 Serial.println("[Emulator] Connection detected via server check");
                 Serial.printf("[Emulator] Connected clients: %d\n", pServer->getConnectedCount());
                 
@@ -248,7 +248,7 @@ void loop() {
         } else {
             if (deviceConnected) {
                 deviceConnected = false;
-                digitalWrite(LED_PIN, LOW);
+                // digitalWrite(LED_PIN, LOW); // Let the centralized logic handle the LED
                 Serial.println("[Emulator] Disconnection detected via server check");
             }
         }
@@ -263,8 +263,9 @@ void loop() {
         }
     }
     
-    // Handle LED blinking when not connected
+    // Handle LED state based on connection status
     if (!deviceConnected) {
+        // Blink LED when not connected
         if (currentTime - lastBlinkTime >= LED_BLINK_INTERVAL) {
             ledState = !ledState;
             digitalWrite(LED_PIN, ledState);
@@ -275,6 +276,8 @@ void loop() {
     } else {
         // When connected, ensure LED stays solid ON
         digitalWrite(LED_PIN, HIGH);
+        // Reset blink state for next disconnection
+        ledState = false;
     }
     
     // Send data packets when connected
