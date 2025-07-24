@@ -8,11 +8,13 @@ NimBLECharacteristic* pCharacteristic;
 bool deviceConnected = false;
 
 class ServerCallbacks : public NimBLEServerCallbacks {
-    void onConnect(NimBLEServer* pServer) override {
+    void onConnect(NimBLEServer* pServer, ble_gap_conn_desc* desc) {
       deviceConnected = true;
+      Serial.println("[Emulator] Device connected.");
     }
-    void onDisconnect(NimBLEServer* pServer) override {
+    void onDisconnect(NimBLEServer* pServer) {
       deviceConnected = false;
+      Serial.println("[Emulator] Device disconnected.");
     }
 };
 
@@ -51,7 +53,8 @@ void fill_packet(uint8_t* data, uint8_t index, uint32_t t) {
             break;
         case 1: // Voltage, power, etc.
             {
-                // Voltage (bytes 0,1): 900 = 90.0V
+                // Voltage (bytes 2,3): 900 = 90.0V
+                // Note: EKSR Instrument expects voltage in pData[0] and pData[1] after skipping header and index, which matches data[2] and data[3] here.
                 uint16_t voltage = 900;
                 data[2] = (voltage >> 8) & 0xFF;
                 data[3] = voltage & 0xFF;
@@ -103,6 +106,16 @@ void loop() {
     fill_packet(data, indices[idx], t);
     pCharacteristic->setValue(data, 16);
     pCharacteristic->notify();
+    // --- Serial debug output for sent packet ---
+    Serial.print("[Emulator] Sent packet index ");
+    Serial.print(indices[idx]);
+    Serial.print(": ");
+    for (int i = 0; i < 16; ++i) {
+      if (data[i] < 16) Serial.print("0");
+      Serial.print(data[i], HEX);
+      Serial.print(" ");
+    }
+    Serial.println();
     idx = (idx + 1) % (sizeof(indices)/sizeof(indices[0]));
     t += 30;
     delay(30); // mimic real controller's update rate

@@ -1031,28 +1031,40 @@ void message_handler(uint8_t *pData) {
       odo_trip1.update_distance(distance);
       odo_trip2.update_distance(distance);
     
+      // --- Serial output for debugging ---
+      Serial.println("\n[FarDriver Data Update]");
+      Serial.print("RPM: "); Serial.println(ctr_data.rpm);
+      Serial.print("Speed (km/h): "); Serial.println(ctr_data.speed, 2);
+      Serial.print("Gear: "); Serial.println(ctr_data.gear);
+      Serial.print("Power (kW): "); Serial.println(ctr_data.power, 2);
       break;
     
     case 1:
       ctr_data.voltage = ((uint16_t) pData[0] << 8) | pData[1];    // battery voltage
       ctr_data.voltage /= 10.0;                                     // voltage is given in 100mV steps, convert to float
       
-
       //current = ((int16_t) pData[6] << 8) | pData[7];     // iQin, negative when driving, positive on regen
       //power = ((float) current/100.0) * voltage / 1000.0;  // power in kW (neg on driving, pos on regen)
 
       odo_total.update_power(-ctr_data.power);
       odo_trip1.update_power(-ctr_data.power);
       odo_trip2.update_power(-ctr_data.power);
+      // --- Serial output for debugging ---
+      Serial.print("Voltage (V): "); Serial.println(ctr_data.voltage, 2);
       break;
       
     case 4:
       ctr_data.controller_temp = (float) pData[2];                 // deg C
+      // --- Serial output for debugging ---
+      Serial.print("Controller Temp (C): "); Serial.println(ctr_data.controller_temp, 1);
       break;
       
     case 13:
       ctr_data.motor_temp = (float) pData[0];                      // deg C
       ctr_data.throttle = ((uint16_t) pData[2] << 8) | pData[3];   // raw ADC reading 0-4095
+      // --- Serial output for debugging ---
+      Serial.print("Motor Temp (C): "); Serial.println(ctr_data.motor_temp, 1);
+      Serial.print("Throttle (raw): "); Serial.println(ctr_data.throttle);
       break;
   }
 
