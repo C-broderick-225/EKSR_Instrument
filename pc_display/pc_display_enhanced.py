@@ -314,6 +314,23 @@ class EKSRDisplayEnhanced:
         tk.Label(title_frame, text="Control Panel", 
                 font=FONTS['body'], fg=COLORS['text_secondary'], bg=COLORS['bg_medium']).pack()
         
+        # Connection controls
+        connection_frame = tk.Frame(self.sidebar, bg=COLORS['bg_medium'])
+        connection_frame.pack(fill='x', padx=10, pady=(0, 10))
+        
+        self.connect_btn = ModernButton(connection_frame, text="Connect", 
+                                      bg=COLORS['accent_blue'], fg=COLORS['text_primary'],
+                                      command=self.toggle_connection)
+        self.connect_btn.pack(side='left', fill='x', expand=True, padx=(0, 5))
+        
+        self.disconnect_btn = ModernButton(connection_frame, text="Disconnect", 
+                                         bg=COLORS['error'], fg=COLORS['text_primary'],
+                                         command=self.disconnect_device)
+        self.disconnect_btn.pack(side='right', fill='x', expand=True, padx=(5, 0))
+        
+        # Update button states
+        self.update_connection_buttons()
+        
         # Terminal section
         self.create_terminal_section()
     
@@ -550,49 +567,72 @@ class EKSRDisplayEnhanced:
     
 
     
+    def update_connection_buttons(self):
+        """Update the state of connection buttons based on current status"""
+        has_recent_data = (time.time() - ctr_data.last_update) < 5.0
+        actual_connected = is_connected or has_recent_data
+        
+        if actual_connected:
+            self.connect_btn.config(text="Reconnect", bg=COLORS['warning'], state='normal')
+            self.disconnect_btn.config(state='normal')
+        else:
+            self.connect_btn.config(text="Connect", bg=COLORS['accent_blue'], state='normal')
+            self.disconnect_btn.config(state='disabled')
+    
     def toggle_connection(self):
         """Toggle connection status - connect or disconnect from BLE device"""
         global is_connected, should_disconnect, client
         
         if is_connected:
             # Disconnect
-            log_to_terminal("Manual disconnect requested", "INFO")
-            should_disconnect = True
-            is_connected = False
-            
-            # Disconnect the client
-            if client:
-                try:
-                    # Run disconnect in a separate thread to avoid blocking
-                    def disconnect_client():
-                        try:
-                            # Check if client is still connected before trying to disconnect
-                            if client and hasattr(client, 'is_connected') and client.is_connected:
-                                loop = asyncio.new_event_loop()
-                                asyncio.set_event_loop(loop)
-                                loop.run_until_complete(client.disconnect())
-                                loop.close()
-                                log_to_terminal("Client disconnected successfully", "INFO")
-                            else:
-                                log_to_terminal("Client was already disconnected", "INFO")
-                        except Exception as e:
-                            error_msg = str(e) if e else "Unknown error"
-                            error_type = type(e).__name__
-                            log_to_terminal(f"Error during disconnect: {error_type}: {error_msg}", "ERROR")
-                    
-                    disconnect_thread = threading.Thread(target=disconnect_client, daemon=True)
-                    disconnect_thread.start()
-                    
-                except Exception as e:
-                    error_msg = str(e) if e else "Unknown error"
-                    error_type = type(e).__name__
-                    log_to_terminal(f"Error disconnecting: {error_type}: {error_msg}", "ERROR")
-            
-            log_to_terminal("Disconnected from FarDriver emulator", "INFO")
+            self.disconnect_device()
         else:
             # Connect - reset disconnect flag to allow reconnection
             log_to_terminal("Manual connect requested", "INFO")
             should_disconnect = False
+            self.connect_btn.config(state='disabled', text="Connecting...")
+    
+    def disconnect_device(self):
+        """Disconnect from the BLE device"""
+        global is_connected, should_disconnect, client
+        
+        log_to_terminal("Manual disconnect requested", "INFO")
+        should_disconnect = True
+        is_connected = False
+        
+        # Update button states immediately
+        self.connect_btn.config(text="Connect", bg=COLORS['accent_blue'], state='normal')
+        self.disconnect_btn.config(state='disabled')
+        
+        # Disconnect the client
+        if client:
+            try:
+                # Run disconnect in a separate thread to avoid blocking
+                def disconnect_client():
+                    try:
+                        # Check if client is still connected before trying to disconnect
+                        if client and hasattr(client, 'is_connected') and client.is_connected:
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                            loop.run_until_complete(client.disconnect())
+                            loop.close()
+                            log_to_terminal("Client disconnected successfully", "INFO")
+                        else:
+                            log_to_terminal("Client was already disconnected", "INFO")
+                    except Exception as e:
+                        error_msg = str(e) if e else "Unknown error"
+                        error_type = type(e).__name__
+                        log_to_terminal(f"Error during disconnect: {error_type}: {error_msg}", "ERROR")
+                
+                disconnect_thread = threading.Thread(target=disconnect_client, daemon=True)
+                disconnect_thread.start()
+                
+            except Exception as e:
+                error_msg = str(e) if e else "Unknown error"
+                error_type = type(e).__name__
+                log_to_terminal(f"Error disconnecting: {error_type}: {error_msg}", "ERROR")
+        
+        log_to_terminal("Disconnected from FarDriver emulator", "INFO")
     
     def toggle_pause(self):
         """Toggle pause/resume of terminal logging and display updates"""
@@ -953,6 +993,9 @@ class EKSRDisplayEnhanced:
             
             # Update gear
             self.gear_label.config(text=f"{ctr_data.gear}")
+        
+        # Update connection buttons
+        self.update_connection_buttons()
         
         # Update info panel (always check)
         if terminal_paused:
