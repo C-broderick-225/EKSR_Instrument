@@ -79,7 +79,26 @@ This directory contains a comprehensive BLE emulator for the FarDriver controlle
 - **Size:** 16 bytes
 - **Header:** `data[0] = 0xAA`
 - **Index:** `data[1]` (0, 1, 4, 13)
-- **Data:** Remaining bytes contain dynamically calculated values
+- **Data:** `data[2-13]` (12 bytes of packet-specific data)
+- **Checksum:** `data[14]` (XOR of bytes 1-13)
+- **Reserved:** `data[15]` (0x00)
+
+### Packet Data Layout
+- **Index 0 (Main Data):**
+  - `data[2]`: Gear bits (bits 2-3: 00=high, 11=mid, 10=low)
+  - `data[4-5]`: RPM (16-bit)
+  - `data[8-9]`: iq current (16-bit, 0.01A resolution)
+  - `data[10-11]`: id current (16-bit, 0.01A resolution)
+
+- **Index 1 (Voltage):**
+  - `data[2-3]`: Battery voltage (16-bit, 0.1V resolution)
+
+- **Index 4 (Controller Temp):**
+  - `data[2]`: Controller temperature (°C)
+
+- **Index 13 (Motor/Throttle):**
+  - `data[2]`: Motor temperature (°C)
+  - `data[4-5]`: Throttle position (16-bit, 0-4095 raw ADC)
 
 ## Example Use Case
 1. Power up the ESP32 running this emulator

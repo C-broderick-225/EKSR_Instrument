@@ -15,7 +15,7 @@ Since you don't have the physical TFT display, here are several ways to run your
    **A. GUI Display (Windows/macOS/Linux):**
    ```bash
    python setup_pc_display.py  # Install dependencies
-   python pc_display.py        # Run GUI application
+   @        # Run GUI application
    ```
 
    **B. Terminal Display (Any OS):**
