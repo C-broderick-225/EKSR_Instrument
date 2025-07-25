@@ -4,27 +4,31 @@ This directory contains a comprehensive BLE emulator for the FarDriver controlle
 
 ## Features
 - **Dual Service Support**: Emulates both the FarDriver BLE protocol (service UUID `FFE0`, characteristic UUID `FFEC`) and the standard Nordic UART Service (NUS)
-- **Realistic Data Simulation**: Sends cyclic data packets with dynamic values including:
-  - RPM with sine wave variation (1000-1400 RPM)
-  - Voltage (90.0V)
-  - Controller temperature (40°C)
-  - Motor temperature (50°C)
-  - Throttle position (mid-range: 2048)
-  - Current values (iq: 5.00A, id: 2.00A)
+- **Dynamic Ebike Simulation**: Realistic acceleration and deceleration patterns that cycle every 30 seconds:
+  - **Acceleration Phase** (10s): Accelerate from 0 to 25 km/h at 2 km/h per second
+  - **Maintain Phase** (10s): Hold speed at 25 km/h with slight variations
+  - **Deceleration Phase** (10s): Decelerate from 25 to 0 km/h at 1.5 km/h per second
+- **Realistic Data Relationships**: All parameters are dynamically calculated based on speed and throttle:
+  - **RPM**: Calculated from speed using realistic gear ratios and wheel circumference
+  - **Current (iq/id)**: Varies with throttle position and power demand
+  - **Voltage**: Slight voltage drop under load (up to 5%)
+  - **Temperature**: Increases with power usage (35-50°C controller, 40-60°C motor)
+  - **Throttle**: Dynamic position that follows acceleration/deceleration patterns
 - **Visual Status Indication**: Built-in LED (pin 2) shows connection status:
   - Blinking: Advertising/disconnected
   - Solid ON: Connected
-- **Comprehensive Debugging**: Serial output with packet data, connection events, and status updates
+- **Comprehensive Debugging**: Serial output with packet data, connection events, and simulation state
 - **Bidirectional Communication**: Supports both notifications and write operations
 - **Robust Connection Handling**: Automatic connection detection and recovery
 
 ## File Overview
-- `FarDriverEmulator.ino` — Main Arduino sketch for the emulator
+- `FarDriverEmulator.ino` — Main Arduino sketch for the emulator with dynamic ebike simulation
 
 ## How It Works
 - The emulator advertises as "FarDriver_Emu" with both FarDriver and Nordic UART services
 - It cycles through four packet indices (0, 1, 4, 13) every 30ms when connected
-- Each packet contains 16 bytes with realistic simulated data
+- Each packet contains 16 bytes with dynamically calculated realistic data
+- The ebike simulation updates continuously, creating realistic acceleration/deceleration patterns
 - The emulator sends data to both services simultaneously for maximum compatibility
 - Connection status is monitored continuously with automatic LED state management
 
@@ -34,17 +38,31 @@ This directory contains a comprehensive BLE emulator for the FarDriver controlle
 3. Open `FarDriverEmulator.ino` in your IDE
 4. Select your ESP32 board (e.g., ESP-WROVER-E)
 5. Compile and upload the sketch to your board
-6. Open Serial Monitor at 115200 baud to see debug output
+6. Open Serial Monitor at 115200 baud to see debug output and simulation state
 
 ## Customizing the Emulation
-- The `fill_packet` function controls the data sent for each packet index
-- You can modify simulated values in the switch statement:
-  - `INDEX_MAIN_DATA` (0): RPM, gear, current values
-  - `INDEX_VOLTAGE` (1): Battery voltage
-  - `INDEX_CONTROLLER_TEMP` (4): Controller temperature
-  - `INDEX_MOTOR_THROTTLE` (13): Motor temperature and throttle position
+- The `update_ebike_simulation()` function controls the acceleration/deceleration patterns
+- The `fill_packet()` function calculates realistic data based on the simulation state
+- You can modify simulation parameters in the `EbikeState` struct:
+  - `acceleration_rate`: How fast the bike accelerates/decelerates
+  - `target_speed`: Maximum speed during acceleration phase
+  - Cycle timing: Currently 30 seconds total (10s each phase)
 - Adjust `PACKET_UPDATE_INTERVAL` to change transmission frequency
 - Modify `LED_BLINK_INTERVAL` to change LED blink rate
+
+## Simulation Details
+### Ebike Physics
+- **Wheel Circumference**: 1.35 meters (typical for 26" wheel)
+- **Gear Ratio**: 4:1 (motor to wheel)
+- **Speed Calculation**: RPM = (Speed × 1000) / (60 × 1.35) × 4
+- **Power Relationship**: Current varies with throttle position and speed
+
+### Data Relationships
+- **RPM Range**: 100-3000 RPM (with realistic variation)
+- **Current Range**: 3-7A (iq), 1-3A (id) based on power demand
+- **Voltage**: 90V base with up to 5% drop under load
+- **Temperature**: 35-50°C controller, 40-60°C motor
+- **Throttle**: 0-4095 raw ADC values (0-100% position)
 
 ## Protocol Details
 ### FarDriver Service
@@ -61,23 +79,34 @@ This directory contains a comprehensive BLE emulator for the FarDriver controlle
 - **Size:** 16 bytes
 - **Header:** `data[0] = 0xAA`
 - **Index:** `data[1]` (0, 1, 4, 13)
-- **Data:** Remaining bytes contain simulated values (see `fill_packet` function)
+- **Data:** Remaining bytes contain dynamically calculated values
 
 ## Example Use Case
 1. Power up the ESP32 running this emulator
 2. Watch the LED blink while advertising
 3. Start the EKSR Instrument client (ESP32-S3-WROOM-1 with the original firmware)
-4. The client should connect and the LED will turn solid ON <----this is not working for some reason
-5. Monitor Serial output to see packet transmission and connection status
-6. The client will display the emulated data as if connected to a real FarDriver controller
+4. The client should connect and the LED will turn solid ON
+5. Monitor Serial output to see packet transmission, connection status, and simulation state
+6. The client will display dynamic data showing realistic ebike acceleration/deceleration
+7. Watch the speed, RPM, and power values change in real-time as the simulation cycles
 
 ## Debug Output
 The emulator provides comprehensive debug information via Serial:
 - Connection/disconnection events with client MAC addresses
 - Packet data in hexadecimal format
-- Periodic status updates
+- Periodic status updates with connection state
+- Ebike simulation state (speed, throttle, cycle count)
 - MTU size changes
 - Received data from clients
+
+## Simulation Pattern
+The emulator follows a repeating 30-second cycle:
+1. **0-10s**: Accelerate from 0 to 25 km/h (throttle increases)
+2. **10-20s**: Maintain 25 km/h (throttle varies slightly)
+3. **20-30s**: Decelerate from 25 to 0 km/h (throttle decreases)
+4. **Repeat**: Cycle continues indefinitely
+
+This creates a realistic demonstration of ebike operation that's perfect for testing displays and monitoring systems.
 
 ---
 

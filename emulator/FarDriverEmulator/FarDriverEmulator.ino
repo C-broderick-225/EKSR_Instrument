@@ -26,6 +26,18 @@ enum PacketIndex {
     INDEX_MOTOR_THROTTLE = 13   // Motor temp, throttle
 };
 
+// Ebike simulation state
+struct EbikeState {
+    float current_speed;      // Current speed in km/h
+    float target_speed;       // Target speed for acceleration/deceleration
+    float acceleration_rate;  // Acceleration rate in km/h per second
+    float throttle_position;  // Throttle position (0.0 to 1.0)
+    bool is_accelerating;     // Whether currently accelerating
+    bool is_decelerating;     // Whether currently decelerating
+    unsigned long last_update; // Last update timestamp
+    int cycle_count;          // Cycle counter for pattern changes
+};
+
 // Global variables
 NimBLECharacteristic* pFarDriverCharacteristic = nullptr;
 NimBLECharacteristic* pNusTxCharacteristic = nullptr;
@@ -33,6 +45,18 @@ NimBLECharacteristic* pNusRxCharacteristic = nullptr;
 bool deviceConnected = false;
 unsigned long lastBlinkTime = 0;
 bool ledState = false;
+
+// Ebike simulation state
+EbikeState ebike_state = {
+    .current_speed = 0.0f,
+    .target_speed = 0.0f,
+    .acceleration_rate = 2.0f,  // 2 km/h per second
+    .throttle_position = 0.0f,
+    .is_accelerating = false,
+    .is_decelerating = false,
+    .last_update = 0,
+    .cycle_count = 0
+};
 
 // Packet indices array - optimized for cache locality
 static const uint8_t PACKET_INDICES[] = {INDEX_MAIN_DATA, INDEX_VOLTAGE, INDEX_CONTROLLER_TEMP, INDEX_MOTOR_THROTTLE};
@@ -74,8 +98,69 @@ class NusCallbacks : public NimBLECharacteristicCallbacks {
     }
 };
 
-// Optimized packet generation
+// Update ebike simulation state
+void update_ebike_simulation() {
+    unsigned long current_time = millis();
+    float delta_time = (current_time - ebike_state.last_update) / 1000.0f; // Convert to seconds
+    ebike_state.last_update = current_time;
+    
+    // Update cycle counter every 10 seconds
+    if (current_time % 10000 < 30) { // Within 30ms window
+        ebike_state.cycle_count++;
+        
+        // Change behavior every 30 seconds (3 cycles of 10 seconds each)
+        if (ebike_state.cycle_count % 3 == 0) {
+            // Start acceleration phase
+            ebike_state.target_speed = 25.0f; // Target 25 km/h
+            ebike_state.is_accelerating = true;
+            ebike_state.is_decelerating = false;
+            ebike_state.acceleration_rate = 2.0f; // 2 km/h per second
+        } else if (ebike_state.cycle_count % 3 == 1) {
+            // Maintain speed phase
+            ebike_state.is_accelerating = false;
+            ebike_state.is_decelerating = false;
+        } else {
+            // Deceleration phase
+            ebike_state.target_speed = 0.0f;
+            ebike_state.is_accelerating = false;
+            ebike_state.is_decelerating = true;
+            ebike_state.acceleration_rate = 1.5f; // Slower deceleration
+        }
+    }
+    
+    // Update speed based on current state
+    if (ebike_state.is_accelerating) {
+        ebike_state.current_speed += ebike_state.acceleration_rate * delta_time;
+        if (ebike_state.current_speed >= ebike_state.target_speed) {
+            ebike_state.current_speed = ebike_state.target_speed;
+            ebike_state.is_accelerating = false;
+        }
+        // Increase throttle during acceleration
+        ebike_state.throttle_position = min(1.0f, ebike_state.throttle_position + 0.1f * delta_time);
+    } else if (ebike_state.is_decelerating) {
+        ebike_state.current_speed -= ebike_state.acceleration_rate * delta_time;
+        if (ebike_state.current_speed <= ebike_state.target_speed) {
+            ebike_state.current_speed = ebike_state.target_speed;
+            ebike_state.is_decelerating = false;
+        }
+        // Decrease throttle during deceleration
+        ebike_state.throttle_position = max(0.0f, ebike_state.throttle_position - 0.15f * delta_time);
+    } else {
+        // Maintain speed - slight throttle adjustments
+        ebike_state.throttle_position = 0.3f + 0.1f * sin(current_time / 2000.0f);
+    }
+    
+    // Ensure speed doesn't go negative
+    if (ebike_state.current_speed < 0.0f) {
+        ebike_state.current_speed = 0.0f;
+    }
+}
+
+// Optimized packet generation with dynamic ebike simulation
 void fill_packet(uint8_t* data, uint8_t index, uint32_t timestamp) {
+    // Update ebike simulation
+    update_ebike_simulation();
+    
     // Initialize packet header
     data[0] = PACKET_HEADER;
     data[1] = index;
@@ -88,14 +173,30 @@ void fill_packet(uint8_t* data, uint8_t index, uint32_t timestamp) {
             // Gear bits (mid position)
             data[2] = 0x00;
             
-            // Simulate RPM with sine wave variation
-            uint16_t rpm = 1200 + (uint16_t)(200 * sin(timestamp / 1000.0));
+            // Calculate RPM based on speed (realistic ebike relationship)
+            // Assuming 4:1 gear ratio and 1.35m wheel circumference
+            float wheel_rpm = (ebike_state.current_speed * 1000.0f) / (60.0f * 1.35f); // Convert km/h to m/min, then to RPM
+            uint16_t rpm = (uint16_t)(wheel_rpm * 4.0f); // Apply gear ratio
+            
+            // Add some realistic variation
+            rpm += (uint16_t)(50 * sin(timestamp / 500.0f));
+            
+            // Ensure RPM stays in reasonable range
+            if (rpm < 100) rpm = 100;
+            if (rpm > 3000) rpm = 3000;
+            
             data[4] = (rpm >> 8) & 0xFF;
             data[5] = rpm & 0xFF;
             
-            // Current values (iq, id)
-            const int16_t iq = 500; // 5.00A
-            const int16_t id = 200; // 2.00A
+            // Calculate current values based on throttle and speed
+            float power_factor = ebike_state.throttle_position * (ebike_state.current_speed / 25.0f);
+            int16_t iq = (int16_t)(300 + 400 * power_factor); // 3A to 7A range
+            int16_t id = (int16_t)(100 + 200 * power_factor); // 1A to 3A range
+            
+            // Add some variation
+            iq += (int16_t)(20 * sin(timestamp / 300.0f));
+            id += (int16_t)(10 * sin(timestamp / 400.0f));
+            
             data[8] = (iq >> 8) & 0xFF;
             data[9] = iq & 0xFF;
             data[10] = (id >> 8) & 0xFF;
@@ -104,24 +205,30 @@ void fill_packet(uint8_t* data, uint8_t index, uint32_t timestamp) {
         }
         
         case INDEX_VOLTAGE: {
-            // Voltage: 90.0V (900 in 100mV units)
-            const uint16_t voltage = 900;
+            // Voltage with slight variation based on load
+            float voltage_variation = 1.0f - (ebike_state.throttle_position * 0.05f); // 5% drop under load
+            uint16_t voltage = (uint16_t)(900 * voltage_variation); // Base 90.0V
             data[2] = (voltage >> 8) & 0xFF;
             data[3] = voltage & 0xFF;
             break;
         }
         
         case INDEX_CONTROLLER_TEMP: {
-            data[2] = 40; // 40°C controller temperature
+            // Temperature increases with power usage
+            uint8_t temp = (uint8_t)(35 + ebike_state.throttle_position * 15); // 35-50°C range
+            data[2] = temp;
             break;
         }
         
         case INDEX_MOTOR_THROTTLE: {
-            data[2] = 50; // 50°C motor temperature
-            // Throttle at mid position (2048)
-            const uint16_t throttle = 2048;
-            data[4] = (throttle >> 8) & 0xFF;
-            data[5] = throttle & 0xFF;
+            // Motor temperature follows controller temp with slight delay
+            uint8_t motor_temp = (uint8_t)(40 + ebike_state.throttle_position * 20); // 40-60°C range
+            data[2] = motor_temp;
+            
+            // Convert throttle position to raw ADC value (0-4095)
+            uint16_t throttle_raw = (uint16_t)(ebike_state.throttle_position * 4095.0f);
+            data[4] = (throttle_raw >> 8) & 0xFF;
+            data[5] = throttle_raw & 0xFF;
             break;
         }
     }
@@ -190,11 +297,16 @@ void setup_ble_advertising() {
 
 void setup() {
     Serial.begin(115200);
-    Serial.println("[Emulator] Starting FarDriver BLE Emulator");
+    Serial.println("[Emulator] Starting FarDriver BLE Emulator with Dynamic Ebike Simulation");
     
     // Initialize LED
     pinMode(LED_PIN, OUTPUT);
     digitalWrite(LED_PIN, LOW);
+    
+    // Initialize ebike simulation
+    ebike_state.last_update = millis();
+    Serial.println("[Emulator] Ebike simulation initialized");
+    Serial.println("[Emulator] Pattern: Accelerate to 25 km/h -> Maintain -> Decelerate to 0 km/h (30s cycle)");
     
     // Initialize BLE
     NimBLEDevice::init(DEVICE_NAME);
@@ -253,13 +365,19 @@ void loop() {
             }
         }
         
-        // Debug: Print connection status every 5 seconds
+        // Debug: Print connection status and simulation state every 5 seconds
         static unsigned long lastStatusPrint = 0;
         if (currentTime - lastStatusPrint >= 5000) {
             lastStatusPrint = currentTime;
             Serial.printf("[Emulator] Status - deviceConnected: %s, Server clients: %d\n", 
                 deviceConnected ? "true" : "false", 
                 pServer ? pServer->getConnectedCount() : 0);
+            
+            // Print ebike simulation state
+            Serial.printf("[Emulator] Ebike State - Speed: %.1f km/h, Throttle: %.1f%%, Cycle: %d\n",
+                ebike_state.current_speed,
+                ebike_state.throttle_position * 100.0f,
+                ebike_state.cycle_count);
         }
     }
     

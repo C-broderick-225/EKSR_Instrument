@@ -376,10 +376,11 @@ void setup() {
   Serial.println("Init TFT");
   // Initialise the screen
   tft.init();
+  Serial.println("After TFT");
   // set portrait orientation
   tft.setRotation(0);
 
-  // start up Nimble
+    // start up Nimble
 #if USE_NIMBLE
   active_screen = AS_CONNECTING;
   start_screen_init();  // spinner screen
