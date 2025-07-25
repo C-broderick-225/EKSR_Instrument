@@ -48,23 +48,54 @@ import gc
 FARDRIVER_SERVICE_UUID = "ffe0"
 FARDRIVER_CHARACTERISTIC_UUID = "ffec"
 
-# Color scheme and styling
+# Color scheme and styling - Modern 2024 Design System
 COLORS = {
-    'bg_dark': '#1a1a1a',
-    'bg_medium': '#2d2d2d',
-    'bg_light': '#404040',
-    'accent_blue': '#00b4d8',
-    'accent_green': '#00d4aa',
-    'accent_red': '#ff6b6b',
-    'accent_orange': '#ffa726',
-    'accent_purple': '#ab47bc',
-    'text_primary': '#ffffff',
-    'text_secondary': '#b0b0b0',
-    'text_muted': '#808080',
-    'success': '#4caf50',
-    'warning': '#ff9800',
-    'error': '#f44336',
-    'info': '#2196f3'
+    # Background colors - Modern dark theme with better contrast
+    'bg_dark': '#0f0f23',      # Deep dark blue-black
+    'bg_medium': '#1a1a2e',    # Dark blue-grey
+    'bg_light': '#16213e',     # Medium blue-grey
+    'bg_lighter': '#0f3460',   # Lighter blue-grey for hover states
+    
+    # Primary accent colors - Modern, vibrant, accessible
+    'primary': '#6366f1',      # Modern indigo (primary action)
+    'primary_hover': '#4f46e5', # Darker indigo for hover
+    'secondary': '#8b5cf6',    # Modern violet (secondary action)
+    'secondary_hover': '#7c3aed', # Darker violet for hover
+    
+    # Semantic colors - High contrast, accessible
+    'success': '#10b981',      # Modern emerald green
+    'success_hover': '#059669', # Darker emerald
+    'warning': '#f59e0b',      # Modern amber
+    'warning_hover': '#d97706', # Darker amber
+    'error': '#ef4444',        # Modern red
+    'error_hover': '#dc2626',  # Darker red
+    'info': '#3b82f6',         # Modern blue
+    'info_hover': '#2563eb',   # Darker blue
+    
+    # Text colors - High contrast for accessibility
+    'text_primary': '#f8fafc',   # Almost white
+    'text_secondary': '#cbd5e1', # Light grey
+    'text_muted': '#94a3b8',     # Medium grey
+    'text_disabled': '#64748b',  # Dark grey for disabled
+    
+    # Button colors - Semantic mapping
+    'btn_primary': '#6366f1',    # Connect button
+    'btn_primary_hover': '#4f46e5',
+    'btn_danger': '#ef4444',     # Disconnect button
+    'btn_danger_hover': '#dc2626',
+    'btn_success': '#10b981',    # Recording start
+    'btn_success_hover': '#059669',
+    'btn_warning': '#f59e0b',    # Recording stop
+    'btn_warning_hover': '#d97706',
+    'btn_secondary': '#8b5cf6',  # Settings button
+    'btn_secondary_hover': '#7c3aed',
+    
+    # Legacy compatibility (mapped to new colors)
+    'accent_blue': '#3b82f6',
+    'accent_green': '#10b981',
+    'accent_red': '#ef4444',
+    'accent_orange': '#f59e0b',
+    'accent_purple': '#8b5cf6'
 }
 
 # Fonts
@@ -453,7 +484,6 @@ class ModernButton(tk.Button):
     def __init__(self, parent, **kwargs):
         # Store original background color if provided
         self.original_bg = kwargs.get('bg', COLORS['bg_medium'])
-        self.hover_bg = COLORS['bg_light']
         self._is_hovered = False
         
         super().__init__(parent, **kwargs)
@@ -462,8 +492,7 @@ class ModernButton(tk.Button):
             borderwidth=0,
             font=FONTS['body'],
             cursor='hand2',
-            bg=self.original_bg,
-            activebackground=self.hover_bg
+            bg=self.original_bg
         )
         self.bind('<Enter>', self.on_enter)
         self.bind('<Leave>', self.on_leave)
@@ -473,7 +502,9 @@ class ModernButton(tk.Button):
         if self['state'] != 'disabled':
             self._is_hovered = True
             try:
-                self.config(bg=self.hover_bg)
+                # Create a lighter version of the original color for hover effect
+                hover_bg = self._lighten_color(self.original_bg)
+                self.config(bg=hover_bg)
             except tk.TclError:
                 pass  # Ignore platform-specific errors
     
@@ -491,14 +522,9 @@ class ModernButton(tk.Button):
         try:
             if 'bg' in kwargs:
                 self.original_bg = kwargs['bg']
-                # Only update if not currently hovered
-                if not self._is_hovered:
-                    super().config(**kwargs)
-                else:
-                    # Update other properties but keep hover color
-                    other_kwargs = {k: v for k, v in kwargs.items() if k != 'bg'}
-                    if other_kwargs:
-                        super().config(**other_kwargs)
+                # Always update the background color, but if hovering, 
+                # the hover effect will override it until mouse leaves
+                super().config(**kwargs)
             else:
                 super().config(**kwargs)
         except tk.TclError as e:
@@ -509,6 +535,33 @@ class ModernButton(tk.Button):
     def configure(self, **kwargs):
         """Alias for config method"""
         return self.config(**kwargs)
+    
+    def _lighten_color(self, color):
+        """Create a darker version of the given color for hover effects (better contrast)"""
+        try:
+            # Handle hex colors
+            if color.startswith('#'):
+                # Remove # and convert to RGB
+                hex_color = color[1:]
+                if len(hex_color) == 3:
+                    hex_color = ''.join([c*2 for c in hex_color])
+                
+                r = int(hex_color[0:2], 16)
+                g = int(hex_color[2:4], 16)
+                b = int(hex_color[4:6], 16)
+                
+                # Darken by 15% for better contrast (instead of lightening)
+                r = max(0, int(r * 0.85))
+                g = max(0, int(g * 0.85))
+                b = max(0, int(b * 0.85))
+                
+                return f'#{r:02x}{g:02x}{b:02x}'
+            else:
+                # For named colors, return a default darker color
+                return COLORS['bg_lighter']
+        except:
+            # Fallback to default darker color
+            return COLORS['bg_lighter']
 
 class GradientCanvas(tk.Canvas):
     """Canvas with gradient background"""
@@ -685,7 +738,7 @@ class EKSRDisplayEnhanced:
         # Configure custom styles
         style.configure('Modern.TFrame', background=COLORS['bg_dark'])
         style.configure('Modern.TLabel', background=COLORS['bg_dark'], foreground=COLORS['text_primary'])
-        style.configure('Modern.TButton', background=COLORS['accent_blue'], foreground=COLORS['text_primary'])
+        style.configure('Modern.TButton', background=COLORS['btn_primary'], foreground=COLORS['text_primary'])
     
     def create_sidebar(self):
         """Create the sidebar with controls and terminal"""
@@ -707,14 +760,9 @@ class EKSRDisplayEnhanced:
         connection_frame.pack(fill='x', padx=10, pady=(0, 10))
         
         self.connect_btn = ModernButton(connection_frame, text="Connect", 
-                                      bg=COLORS['accent_blue'], fg=COLORS['text_primary'],
+                                      bg=COLORS['btn_primary'], fg=COLORS['text_primary'],
                                       command=self.toggle_connection)
-        self.connect_btn.pack(side='left', fill='x', expand=True, padx=(0, 5))
-        
-        self.disconnect_btn = ModernButton(connection_frame, text="Disconnect", 
-                                         bg=COLORS['error'], fg=COLORS['text_primary'],
-                                         command=self.disconnect_device)
-        self.disconnect_btn.pack(side='right', fill='x', expand=True, padx=(5, 0))
+        self.connect_btn.pack(fill='x')
         
         # Update button states
         self.update_connection_buttons()
@@ -751,7 +799,7 @@ class EKSRDisplayEnhanced:
         self.data_info.pack(side='right')
         
         self.record_btn = ModernButton(recording_frame, text="Start Recording", 
-                                      bg=COLORS['accent_blue'], fg=COLORS['text_primary'],
+                                      bg=COLORS['btn_success'], fg=COLORS['text_primary'],
                                       command=self.toggle_recording)
         self.record_btn.pack(fill='x')
     
@@ -787,7 +835,7 @@ class EKSRDisplayEnhanced:
     def create_settings_button(self):
         """Create settings button"""
         settings_btn = ModernButton(self.sidebar, text="Settings", 
-                                    bg=COLORS['accent_purple'], fg=COLORS['text_primary'],
+                                    bg=COLORS['btn_secondary'], fg=COLORS['text_primary'],
                                     command=self.show_settings)
         settings_btn.pack(fill='x', padx=10, pady=10)
     
@@ -1035,7 +1083,7 @@ class EKSRDisplayEnhanced:
 
     
     def update_connection_buttons(self):
-        """Update the state of connection buttons based on current status"""
+        """Update the state of the connection button based on current status"""
         has_recent_data = (time.time() - ctr_data.last_update) < 5.0
         actual_connected = is_connected or has_recent_data
         
@@ -1047,11 +1095,9 @@ class EKSRDisplayEnhanced:
             self._last_connection_state = actual_connected
             
             if actual_connected:
-                self.connect_btn.config(text="Reconnect", bg=COLORS['warning'], state='normal')
-                self.disconnect_btn.config(state='normal')
+                self.connect_btn.config(text="Disconnect", bg=COLORS['btn_danger'], state='normal')
             else:
-                self.connect_btn.config(text="Connect", bg=COLORS['accent_blue'], state='normal')
-                self.disconnect_btn.config(state='disabled')
+                self.connect_btn.config(text="Connect", bg=COLORS['btn_primary'], state='normal')
     
     def update_recording_info(self):
         """Update the recording info text based on auto-save setting"""
@@ -1083,8 +1129,7 @@ class EKSRDisplayEnhanced:
         is_connected = False
         
         # Update button states immediately
-        self.connect_btn.config(text="Connect", bg=COLORS['accent_blue'], state='normal')
-        self.disconnect_btn.config(state='disabled')
+        self.connect_btn.config(text="Connect", bg=COLORS['btn_primary'], state='normal')
         
         # Disconnect the client
         if client:
@@ -1200,7 +1245,7 @@ class EKSRDisplayEnhanced:
             return
         
         self.search_active = False
-        self.search_btn.config(text="🔍", bg=COLORS['accent_blue'])
+        self.search_btn.config(text="🔍", bg=COLORS['btn_primary'])
         
         if self.search_frame:
             self.search_frame.destroy()
@@ -1335,7 +1380,7 @@ class EKSRDisplayEnhanced:
         if ctr_data.recording:
             # Stop recording
             ctr_data.stop_recording()
-            self.record_btn.config(text="Start Recording", bg=COLORS['accent_blue'])
+            self.record_btn.config(text="Start Recording", bg=COLORS['btn_success'])
             
             # Show appropriate message based on auto-save setting
             if settings.get('auto_save', True):
@@ -1345,7 +1390,7 @@ class EKSRDisplayEnhanced:
         else:
             # Start recording
             if ctr_data.start_recording():
-                self.record_btn.config(text="Stop Recording", bg=COLORS['error'])
+                self.record_btn.config(text="Stop Recording", bg=COLORS['btn_warning'])
                 # Message is already logged in start_recording method
             else:
                 messagebox.showerror("Recording Error", "Failed to start recording")
