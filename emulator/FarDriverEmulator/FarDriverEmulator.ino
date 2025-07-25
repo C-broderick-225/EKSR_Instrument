@@ -29,9 +29,12 @@
 #define DEVICE_NAME "FarDriver_Emu"
 #define LED_PIN 2
 #define LED_BLINK_INTERVAL 500
-#define PACKET_UPDATE_INTERVAL 30
+#define PACKET_UPDATE_INTERVAL 20  // Reduced from 30ms to 20ms for faster updates
 #define PACKET_SIZE 16
 #define PACKET_HEADER 0xAA
+
+// Forward declarations
+void restart_ble_advertising();
 
 // Standard Nordic UART Service UUIDs
 #define NUS_SERVICE_UUID        "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
@@ -104,6 +107,10 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         deviceConnected = false;
         // Don't set LED here - let the loop() handle it
         Serial.println("[Emulator] Device disconnected");
+        
+        // Restart advertising when client disconnects
+        Serial.println("[Emulator] Client disconnected - restarting BLE advertising...");
+        restart_ble_advertising();
     }
     
     void onMTUChange(uint16_t MTU, ble_gap_conn_desc* desc) {
@@ -384,6 +391,28 @@ void setup_ble_advertising() {
     pAdvertising->start();
 }
 
+// Restart BLE advertising with error checking
+void restart_ble_advertising() {
+    NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
+    
+    if (pAdvertising) {
+        // Stop advertising first if it's running
+        if (pAdvertising->isAdvertising()) {
+            pAdvertising->stop();
+            delay(50); // Small delay to ensure stop completes
+        }
+        
+        // Restart advertising
+        if (pAdvertising->start()) {
+            Serial.println("[Emulator] BLE advertising restarted successfully");
+        } else {
+            Serial.println("[Emulator] ERROR: Failed to restart BLE advertising");
+        }
+    } else {
+        Serial.println("[Emulator] ERROR: Could not get advertising object");
+    }
+}
+
 void setup() {
     Serial.begin(115200);
     Serial.println("[Emulator] Starting FarDriver BLE Emulator with Dynamic Ebike Simulation");
@@ -472,6 +501,12 @@ void loop() {
     
     // Handle LED state based on connection status
     if (!deviceConnected) {
+        // Ensure advertising is running when not connected
+        if (!NimBLEDevice::getAdvertising()->isAdvertising()) {
+            Serial.println("[Emulator] Advertising stopped - restarting...");
+            restart_ble_advertising();
+        }
+        
         // Blink LED when not connected
         if (currentTime - lastBlinkTime >= LED_BLINK_INTERVAL) {
             ledState = !ledState;
