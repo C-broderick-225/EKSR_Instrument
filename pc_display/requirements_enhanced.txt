@@ -1,3 +1,17 @@
-bleak>=0.21.0
-asyncio
-tkinter 
+# Core dependencies
+bleak>=0.20.0
+
+# Optional dependencies (for enhanced performance monitoring)
+# psutil>=5.9.0  # Uncomment to enable full performance monitoring
+
+# Built-in modules (no installation needed)
+# asyncio
+# tkinter
+# csv
+# json
+# os
+# datetime
+# threading
+# time
+# math
+# struct 

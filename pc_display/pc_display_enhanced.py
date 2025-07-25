@@ -13,19 +13,36 @@ LAG OPTIMIZATION IMPROVEMENTS:
 - Increased gauge animation speed from 0.1 to 0.3 for faster response
 - Reduced animation completion threshold for quicker settling
 - Emulator packet rate increased from 30ms to 20ms intervals
+
+DEVELOPMENT FEATURES:
+- CSV data export for analysis
+- Packet inspector with detailed breakdown
+- Performance monitoring (FPS, latency)
+- Settings panel for configuration
+- Data recording with timestamps
 """
 
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
+from tkinter import ttk, scrolledtext, messagebox, filedialog
 import asyncio
 import threading
 import time
 import math
+import csv
+import json
+import os
 from datetime import datetime
 from bleak import BleakScanner, BleakClient
 import struct
-import json
-import os
+
+# Optional imports with fallbacks
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    print("Warning: psutil not available. Performance monitoring will be limited.")
+import gc
 
 # BLE Service and Characteristic UUIDs
 FARDRIVER_SERVICE_UUID = "ffe0"
@@ -77,6 +94,20 @@ class ControllerData:
         # Add data change tracking for immediate updates
         self._last_values = {}
         self._has_changes = False
+        
+        # Data recording features
+        self.recording = False
+        self.recorded_data = []
+        self.csv_file = None
+        self.csv_writer = None
+        self.recording_start_time = None
+        
+        # Performance monitoring
+        self.packet_count = 0
+        self.packet_errors = 0
+        self.last_packet_time = 0
+        self.avg_latency = 0
+        self.latency_samples = []
     
     def update_value(self, key, value):
         """Update a value and track if it changed"""
@@ -85,20 +116,331 @@ class ControllerData:
             self._has_changes = True
             setattr(self, key, value)
             self.last_update = time.time()
+            
+            # Record data if recording is active
+            if self.recording:
+                self.record_data_point()
     
     def has_changes(self):
         """Check if any values have changed since last check"""
         has_changes = self._has_changes
         self._has_changes = False
         return has_changes
+    
+    def start_recording(self, filename=None):
+        """Start recording data to CSV file"""
+        if self.recording:
+            return False
+        
+        # Check if auto-save is enabled
+        if not settings.get('auto_save', True):
+            # Just start recording in memory without file
+            self.recording = True
+            self.recording_start_time = time.time()
+            self.recorded_data = []
+            log_to_terminal("Recording started (memory only - auto-save disabled)", "INFO")
+            return True
+        
+        # Create data directory if it doesn't exist
+        data_dir = "data"
+        if not os.path.exists(data_dir):
+            os.makedirs(data_dir)
+        
+        if not filename:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"eksr_data_{timestamp}.csv"
+        
+        # Ensure filename is in the data directory
+        if not os.path.dirname(filename):
+            filename = os.path.join(data_dir, filename)
+        
+        try:
+            self.csv_file = open(filename, 'w', newline='')
+            self.csv_writer = csv.writer(self.csv_file)
+            
+            # Write header with descriptive column names
+            header = ['Timestamp', 'Throttle', 'Gear', 'RPM', 'Controller_Temp_C', 
+                     'Motor_Temp_C', 'Speed_kmh', 'Power_W', 'Voltage_V', 'Packet_Count', 'Latency_ms']
+            self.csv_writer.writerow(header)
+            
+            self.recording = True
+            self.recording_start_time = time.time()
+            self.recorded_data = []
+            
+            # Log the filename being used
+            log_to_terminal(f"Recording started - saving to: {filename}", "INFO")
+            
+            return True
+        except Exception as e:
+            log_to_terminal(f"Failed to start recording: {e}", "ERROR")
+            return False
+    
+    def stop_recording(self):
+        """Stop recording data"""
+        if not self.recording:
+            return
+        
+        self.recording = False
+        
+        if self.csv_file:
+            self.csv_file.close()
+            self.csv_file = None
+            self.csv_writer = None
+        
+        # Handle different recording modes
+        if self.recorded_data:
+            if settings.get('auto_save', True):
+                log_to_terminal(f"Recording stopped. CSV data saved with {len(self.recorded_data)} data points in data/ directory.", "INFO")
+            else:
+                log_to_terminal(f"Recording stopped. {len(self.recorded_data)} data points stored in memory (auto-save was disabled).", "INFO")
+    
+    def record_data_point(self):
+        """Record current data point"""
+        if not self.recording:
+            return
+        
+        timestamp = datetime.now().isoformat()
+        data_point = {
+            'timestamp': timestamp,
+            'throttle': self.throttle,
+            'gear': self.gear,
+            'rpm': self.rpm,
+            'controller_temp': self.controller_temp,
+            'motor_temp': self.motor_temp,
+            'speed': self.speed,
+            'power': self.power,
+            'voltage': self.voltage,
+            'packet_count': self.packet_count,
+            'latency': self.avg_latency
+        }
+        
+        self.recorded_data.append(data_point)
+        
+        # Write to CSV only if auto-save is enabled
+        if settings.get('auto_save', True) and self.csv_writer:
+            row = [timestamp, self.throttle, self.gear, self.rpm, 
+                   self.controller_temp, self.motor_temp, self.speed, 
+                   self.power, self.voltage, self.packet_count, self.avg_latency]
+            self.csv_writer.writerow(row)
+            self.csv_file.flush()  # Ensure data is written immediately
+    
+    def update_performance_metrics(self, packet_time, latency):
+        """Update performance monitoring metrics"""
+        self.packet_count += 1
+        self.last_packet_time = packet_time
+        
+        # Update latency tracking (keep last 100 samples)
+        self.latency_samples.append(latency)
+        if len(self.latency_samples) > 100:
+            self.latency_samples.pop(0)
+        
+        self.avg_latency = sum(self.latency_samples) / len(self.latency_samples)
+    
+    def get_performance_stats(self):
+        """Get current performance statistics"""
+        return {
+            'packet_count': self.packet_count,
+            'packet_errors': self.packet_errors,
+            'avg_latency': self.avg_latency,
+            'packet_rate': self.packet_count / max(1, time.time() - self.recording_start_time) if self.recording_start_time else 0,
+            'error_rate': self.packet_errors / max(1, self.packet_count)
+        }
+
+class PacketInspector:
+    """Packet analysis and inspection tool"""
+    
+    def __init__(self):
+        self.packet_history = []
+        self.max_history = 1000
+        self.current_packet = None
+    
+    def analyze_packet(self, data):
+        """Analyze a BLE packet and return detailed information"""
+        if len(data) < 16:
+            return {
+                'valid': False,
+                'error': f'Invalid packet length: {len(data)} (expected 16)',
+                'raw_data': ' '.join([f"{b:02X}" for b in data])  # Exact format from FarDriver
+            }
+        
+        # Check header
+        if data[0] != 0xAA:
+            return {
+                'valid': False,
+                'error': f'Invalid header: 0x{data[0]:02X} (expected 0xAA)',
+                'raw_data': ' '.join([f"{b:02X}" for b in data])  # Exact format from FarDriver
+            }
+        
+        index = data[1]
+        checksum = data[14]
+        reserved = data[15]
+        
+        # Calculate expected checksum
+        expected_checksum = 0
+        for i in range(1, 14):
+            expected_checksum ^= data[i]
+        
+        # Parse packet based on index
+        packet_info = {
+            'valid': True,
+            'index': index,
+            'raw_data': ' '.join([f"{b:02X}" for b in data]),  # Exact format from FarDriver
+            'checksum_valid': checksum == expected_checksum,
+            'checksum': f'0x{checksum:02X}',
+            'expected_checksum': f'0x{expected_checksum:02X}',
+            'reserved': f'0x{reserved:02X}',
+            'timestamp': datetime.now().isoformat(),
+            'parsed_data': {}
+        }
+        
+        # Parse data based on packet type
+        if index == 0:  # Main data
+            packet_info['parsed_data'] = self._parse_main_data(data)
+        elif index == 1:  # Voltage
+            packet_info['parsed_data'] = self._parse_voltage_data(data)
+        elif index == 4:  # Controller temperature
+            packet_info['parsed_data'] = self._parse_controller_temp_data(data)
+        elif index == 13:  # Motor temperature and throttle
+            packet_info['parsed_data'] = self._parse_motor_throttle_data(data)
+        else:
+            packet_info['parsed_data'] = {'unknown_index': f'Index {index} not recognized'}
+        
+        # Store in history
+        self.packet_history.append(packet_info)
+        if len(self.packet_history) > self.max_history:
+            self.packet_history.pop(0)
+        
+        self.current_packet = packet_info
+        return packet_info
+    
+    def _parse_main_data(self, data):
+        """Parse main data packet (index 0)"""
+        gear_bits = (data[2] >> 2) & 0x03
+        gear_map = {0: 'High', 1: 'Mid', 2: 'Low', 3: 'Mid'}
+        gear = gear_map.get(gear_bits, 'Unknown')
+        
+        rpm = (data[4] << 8) | data[5]
+        iq = ((data[8] << 8) | data[9]) / 100.0
+        id = ((data[10] << 8) | data[11]) / 100.0
+        is_mag = (iq * iq + id * id) ** 0.5
+        
+        return {
+            'gear_bits': f'0b{gear_bits:02b}',
+            'gear': gear,
+            'rpm': rpm,
+            'iq_current': f'{iq:.2f}A',
+            'id_current': f'{id:.2f}A',
+            'current_magnitude': f'{is_mag:.2f}A',
+            'data_bytes': {
+                'gear_byte': f'0x{data[2]:02X}',
+                'rpm_high': f'0x{data[4]:02X}',
+                'rpm_low': f'0x{data[5]:02X}',
+                'iq_high': f'0x{data[8]:02X}',
+                'iq_low': f'0x{data[9]:02X}',
+                'id_high': f'0x{data[10]:02X}',
+                'id_low': f'0x{data[11]:02X}'
+            }
+        }
+    
+    def _parse_voltage_data(self, data):
+        """Parse voltage data packet (index 1)"""
+        voltage_raw = (data[2] << 8) | data[3]
+        voltage = voltage_raw / 10.0
+        
+        return {
+            'voltage_raw': voltage_raw,
+            'voltage': f'{voltage:.1f}V',
+            'data_bytes': {
+                'voltage_high': f'0x{data[2]:02X}',
+                'voltage_low': f'0x{data[3]:02X}'
+            }
+        }
+    
+    def _parse_controller_temp_data(self, data):
+        """Parse controller temperature data packet (index 4)"""
+        temp = data[2]
+        
+        return {
+            'temperature': f'{temp}°C',
+            'data_bytes': {
+                'temp_byte': f'0x{data[2]:02X}'
+            }
+        }
+    
+    def _parse_motor_throttle_data(self, data):
+        """Parse motor temperature and throttle data packet (index 13)"""
+        motor_temp = data[2]
+        throttle_raw = (data[4] << 8) | data[5]
+        throttle_percent = (throttle_raw / 4095.0) * 100
+        
+        return {
+            'motor_temperature': f'{motor_temp}°C',
+            'throttle_raw': throttle_raw,
+            'throttle_percent': f'{throttle_percent:.1f}%',
+            'data_bytes': {
+                'motor_temp': f'0x{data[2]:02X}',
+                'throttle_high': f'0x{data[4]:02X}',
+                'throttle_low': f'0x{data[5]:02X}'
+            }
+        }
+    
+    def get_packet_statistics(self):
+        """Get statistics about packet history"""
+        if not self.packet_history:
+            return {}
+        
+        index_counts = {}
+        checksum_errors = 0
+        total_packets = len(self.packet_history)
+        
+        for packet in self.packet_history:
+            if packet['valid']:
+                index = packet['index']
+                index_counts[index] = index_counts.get(index, 0) + 1
+                if not packet['checksum_valid']:
+                    checksum_errors += 1
+        
+        return {
+            'total_packets': total_packets,
+            'valid_packets': sum(1 for p in self.packet_history if p['valid']),
+            'checksum_errors': checksum_errors,
+            'index_distribution': index_counts,
+            'error_rate': checksum_errors / total_packets if total_packets > 0 else 0
+        }
+    
+    def get_recent_packets(self, count=10):
+        """Get the most recent packets"""
+        return self.packet_history[-count:] if self.packet_history else []
 
 # Global variables
 ctr_data = ControllerData()
+packet_inspector = PacketInspector()
 is_connected = False
 client = None
 terminal_widget = None
 terminal_paused = False
 should_disconnect = False
+
+# Performance monitoring
+fps_counter = 0
+last_fps_time = time.time()
+display_fps = 0
+memory_usage = 0
+cpu_usage = 0
+
+# Settings
+settings = {
+    'display_fps': 60,
+    'gauge_animation_fps': 120,
+    'terminal_max_lines': 1000,
+    'packet_history_size': 1000,
+    'auto_record': False,
+    'auto_save': True,  # Automatically save CSV files
+    'record_interval': 1.0,  # seconds
+    'show_performance': True,
+    'show_packet_details': True,
+    'theme': 'dark'
+}
 
 def log_to_terminal(message, level="INFO"):
     """Global function to log messages to terminal"""
@@ -109,21 +451,64 @@ def log_to_terminal(message, level="INFO"):
 class ModernButton(tk.Button):
     """Custom modern button with hover effects"""
     def __init__(self, parent, **kwargs):
+        # Store original background color if provided
+        self.original_bg = kwargs.get('bg', COLORS['bg_medium'])
+        self.hover_bg = COLORS['bg_light']
+        self._is_hovered = False
+        
         super().__init__(parent, **kwargs)
         self.config(
             relief='flat',
             borderwidth=0,
             font=FONTS['body'],
-            cursor='hand2'
+            cursor='hand2',
+            bg=self.original_bg,
+            activebackground=self.hover_bg
         )
         self.bind('<Enter>', self.on_enter)
         self.bind('<Leave>', self.on_leave)
     
     def on_enter(self, event):
-        self.config(bg=COLORS['bg_light'])
+        """Handle mouse enter - only change color if button is enabled"""
+        if self['state'] != 'disabled':
+            self._is_hovered = True
+            try:
+                self.config(bg=self.hover_bg)
+            except tk.TclError:
+                pass  # Ignore platform-specific errors
     
     def on_leave(self, event):
-        self.config(bg=COLORS['bg_medium'])
+        """Handle mouse leave - restore original color"""
+        if self['state'] != 'disabled':
+            self._is_hovered = False
+            try:
+                self.config(bg=self.original_bg)
+            except tk.TclError:
+                pass  # Ignore platform-specific errors
+    
+    def config(self, **kwargs):
+        """Override config to track background color changes"""
+        try:
+            if 'bg' in kwargs:
+                self.original_bg = kwargs['bg']
+                # Only update if not currently hovered
+                if not self._is_hovered:
+                    super().config(**kwargs)
+                else:
+                    # Update other properties but keep hover color
+                    other_kwargs = {k: v for k, v in kwargs.items() if k != 'bg'}
+                    if other_kwargs:
+                        super().config(**other_kwargs)
+            else:
+                super().config(**kwargs)
+        except tk.TclError as e:
+            # Handle platform-specific configuration errors
+            if "unknown option" not in str(e):
+                raise  # Re-raise if it's not an unknown option error
+    
+    def configure(self, **kwargs):
+        """Alias for config method"""
+        return self.config(**kwargs)
 
 class GradientCanvas(tk.Canvas):
     """Canvas with gradient background"""
@@ -259,6 +644,9 @@ class EKSRDisplayEnhanced:
         global terminal_widget
         terminal_widget = self
         
+        # Load settings
+        self.load_settings()
+        
         # Initialize search variables
         self.search_active = False
         self.search_frame = None
@@ -331,10 +719,77 @@ class EKSRDisplayEnhanced:
         # Update button states
         self.update_connection_buttons()
         
+        # Recording controls
+        self.create_recording_section()
+        
+        # Performance monitoring
+        self.create_performance_section()
+        
+        # Settings button
+        self.create_settings_button()
+        
         # Terminal section
         self.create_terminal_section()
     
-
+    def create_recording_section(self):
+        """Create recording controls section"""
+        recording_frame = tk.Frame(self.sidebar, bg=COLORS['bg_medium'])
+        recording_frame.pack(fill='x', padx=10, pady=(0, 10))
+        
+        # Recording header with info about data directory
+        recording_header = tk.Frame(recording_frame, bg=COLORS['bg_medium'])
+        recording_header.pack(fill='x', pady=(0, 5))
+        
+        tk.Label(recording_header, text="Data Recording", 
+                font=FONTS['subheading'], fg=COLORS['text_primary'], 
+                bg=COLORS['bg_medium']).pack(side='left')
+        
+        # Add info about data directory
+        self.data_info = tk.Label(recording_header, text="(auto-saves to data/ folder)", 
+                                 font=FONTS['body'], fg=COLORS['text_muted'], 
+                                 bg=COLORS['bg_medium'])
+        self.data_info.pack(side='right')
+        
+        self.record_btn = ModernButton(recording_frame, text="Start Recording", 
+                                      bg=COLORS['accent_blue'], fg=COLORS['text_primary'],
+                                      command=self.toggle_recording)
+        self.record_btn.pack(fill='x')
+    
+    def create_performance_section(self):
+        """Create performance monitoring section"""
+        performance_frame = tk.Frame(self.sidebar, bg=COLORS['bg_medium'])
+        performance_frame.pack(fill='x', padx=10, pady=(0, 10))
+        
+        tk.Label(performance_frame, text="Performance", 
+                font=FONTS['subheading'], fg=COLORS['text_primary'], 
+                bg=COLORS['bg_medium']).pack(side='left')
+        
+        self.fps_label = tk.Label(performance_frame, text="FPS: 0", 
+                                  font=FONTS['body'], fg=COLORS['text_secondary'], 
+                                  bg=COLORS['bg_medium'])
+        self.fps_label.pack(side='left', padx=5)
+        
+        self.latency_label = tk.Label(performance_frame, text="Latency: 0ms", 
+                                     font=FONTS['body'], fg=COLORS['text_secondary'], 
+                                     bg=COLORS['bg_medium'])
+        self.latency_label.pack(side='left', padx=5)
+        
+        self.memory_label = tk.Label(performance_frame, text="Memory: 0MB", 
+                                    font=FONTS['body'], fg=COLORS['text_secondary'], 
+                                    bg=COLORS['bg_medium'])
+        self.memory_label.pack(side='left', padx=5)
+        
+        self.cpu_label = tk.Label(performance_frame, text="CPU: 0%", 
+                                  font=FONTS['body'], fg=COLORS['text_secondary'], 
+                                  bg=COLORS['bg_medium'])
+        self.cpu_label.pack(side='left', padx=5)
+    
+    def create_settings_button(self):
+        """Create settings button"""
+        settings_btn = ModernButton(self.sidebar, text="Settings", 
+                                    bg=COLORS['accent_purple'], fg=COLORS['text_primary'],
+                                    command=self.show_settings)
+        settings_btn.pack(fill='x', padx=10, pady=10)
     
     def create_terminal_section(self):
         """Create terminal section"""
@@ -355,19 +810,31 @@ class EKSRDisplayEnhanced:
         
         self.pause_btn = ModernButton(controls_frame, text="⏸", 
                                     bg=COLORS['warning'], fg=COLORS['text_primary'],
-                                    command=self.toggle_pause, width=3)
+                                    command=self.toggle_pause)
         self.pause_btn.pack(side='left', padx=2)
         
         self.clear_btn = ModernButton(controls_frame, text="🗑", 
                                     bg=COLORS['bg_light'], fg=COLORS['text_primary'],
-                                    command=self.clear_terminal, width=3)
+                                    command=self.clear_terminal)
         self.clear_btn.pack(side='left', padx=2)
         
         # Search functionality
         self.search_btn = ModernButton(controls_frame, text="🔍", 
                                      bg=COLORS['accent_blue'], fg=COLORS['text_primary'],
-                                     command=self.toggle_search, width=3)
+                                     command=self.toggle_search)
         self.search_btn.pack(side='left', padx=2)
+        
+        # Packet inspector button
+        self.inspector_btn = ModernButton(controls_frame, text="📊", 
+                                        bg=COLORS['accent_purple'], fg=COLORS['text_primary'],
+                                        command=self.show_packet_inspector)
+        self.inspector_btn.pack(side='left', padx=2)
+        
+        # Data folder button
+        self.data_folder_btn = ModernButton(controls_frame, text="📁", 
+                                          bg=COLORS['accent_green'], fg=COLORS['text_primary'],
+                                          command=self.open_data_folder)
+        self.data_folder_btn.pack(side='left', padx=2)
         
         # Terminal widget
         self.terminal = scrolledtext.ScrolledText(
@@ -572,12 +1039,27 @@ class EKSRDisplayEnhanced:
         has_recent_data = (time.time() - ctr_data.last_update) < 5.0
         actual_connected = is_connected or has_recent_data
         
-        if actual_connected:
-            self.connect_btn.config(text="Reconnect", bg=COLORS['warning'], state='normal')
-            self.disconnect_btn.config(state='normal')
-        else:
-            self.connect_btn.config(text="Connect", bg=COLORS['accent_blue'], state='normal')
-            self.disconnect_btn.config(state='disabled')
+        # Only update if state has changed
+        if not hasattr(self, '_last_connection_state'):
+            self._last_connection_state = None
+        
+        if self._last_connection_state != actual_connected:
+            self._last_connection_state = actual_connected
+            
+            if actual_connected:
+                self.connect_btn.config(text="Reconnect", bg=COLORS['warning'], state='normal')
+                self.disconnect_btn.config(state='normal')
+            else:
+                self.connect_btn.config(text="Connect", bg=COLORS['accent_blue'], state='normal')
+                self.disconnect_btn.config(state='disabled')
+    
+    def update_recording_info(self):
+        """Update the recording info text based on auto-save setting"""
+        if hasattr(self, 'data_info'):
+            if settings.get('auto_save', True):
+                self.data_info.config(text="(auto-saves to data/ folder)")
+            else:
+                self.data_info.config(text="(stores in memory only)")
     
     def toggle_connection(self):
         """Toggle connection status - connect or disconnect from BLE device"""
@@ -848,6 +1330,250 @@ class EKSRDisplayEnhanced:
         """Clear all search highlights"""
         self.terminal.tag_remove("search_highlight", 1.0, tk.END)
     
+    def toggle_recording(self):
+        """Toggle data recording on/off"""
+        if ctr_data.recording:
+            # Stop recording
+            ctr_data.stop_recording()
+            self.record_btn.config(text="Start Recording", bg=COLORS['accent_blue'])
+            
+            # Show appropriate message based on auto-save setting
+            if settings.get('auto_save', True):
+                self.log_to_terminal("Data recording stopped - file saved automatically", "INFO")
+            else:
+                self.log_to_terminal("Data recording stopped - data stored in memory", "INFO")
+        else:
+            # Start recording
+            if ctr_data.start_recording():
+                self.record_btn.config(text="Stop Recording", bg=COLORS['error'])
+                # Message is already logged in start_recording method
+            else:
+                messagebox.showerror("Recording Error", "Failed to start recording")
+    
+    def save_recorded_data(self):
+        """Save recorded data to a file"""
+        if not ctr_data.recorded_data:
+            messagebox.showinfo("No Data", "No recorded data to save")
+            return
+        
+        # Create data directory if it doesn't exist
+        data_dir = "data"
+        if not os.path.exists(data_dir):
+            os.makedirs(data_dir)
+        
+        # Set initial directory to data folder
+        filename = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("JSON files", "*.json"), ("All files", "*.*")],
+            title="Save Recorded Data",
+            initialdir=data_dir
+        )
+        
+        if filename:
+            try:
+                if filename.endswith('.json'):
+                    with open(filename, 'w') as f:
+                        json.dump(ctr_data.recorded_data, f, indent=2)
+                else:
+                    with open(filename, 'w', newline='') as f:
+                        writer = csv.writer(f)
+                        # Write standardized header
+                        header = ['Timestamp', 'Throttle', 'Gear', 'RPM', 'Controller_Temp_C', 
+                                 'Motor_Temp_C', 'Speed_kmh', 'Power_W', 'Voltage_V', 'Packet_Count', 'Latency_ms']
+                        writer.writerow(header)
+                        
+                        # Write data rows
+                        if ctr_data.recorded_data:
+                            for data_point in ctr_data.recorded_data:
+                                row = [data_point['timestamp'], data_point['throttle'], data_point['gear'], 
+                                       data_point['rpm'], data_point['controller_temp'], data_point['motor_temp'],
+                                       data_point['speed'], data_point['power'], data_point['voltage'], 
+                                       data_point['packet_count'], data_point['latency']]
+                                writer.writerow(row)
+                
+                self.log_to_terminal(f"Data saved to {filename}", "SUCCESS")
+            except Exception as e:
+                self.log_to_terminal(f"Failed to save data: {e}", "ERROR")
+                messagebox.showerror("Save Error", f"Failed to save data: {e}")
+    
+    def update_performance_display(self):
+        """Update performance monitoring display"""
+        global fps_counter, last_fps_time, display_fps, memory_usage, cpu_usage
+        
+        # Update FPS counter
+        fps_counter += 1
+        current_time = time.time()
+        if current_time - last_fps_time >= 1.0:
+            display_fps = fps_counter
+            fps_counter = 0
+            last_fps_time = current_time
+        
+        # Update system metrics (with fallback if psutil not available)
+        if PSUTIL_AVAILABLE:
+            try:
+                process = psutil.Process()
+                memory_usage = process.memory_info().rss / 1024 / 1024  # MB
+                cpu_usage = process.cpu_percent()
+            except:
+                memory_usage = 0
+                cpu_usage = 0
+        else:
+            # Fallback values when psutil is not available
+            memory_usage = 0
+            cpu_usage = 0
+        
+        # Update labels
+        self.fps_label.config(text=f"FPS: {display_fps}")
+        self.latency_label.config(text=f"Latency: {ctr_data.avg_latency:.1f}ms")
+        
+        if PSUTIL_AVAILABLE:
+            self.memory_label.config(text=f"Memory: {memory_usage:.1f}MB")
+            self.cpu_label.config(text=f"CPU: {cpu_usage:.1f}%")
+        else:
+            self.memory_label.config(text="Memory: N/A")
+            self.cpu_label.config(text="CPU: N/A")
+        
+        # Update packet statistics
+        stats = ctr_data.get_performance_stats()
+        packet_stats = packet_inspector.get_packet_statistics()
+        
+        # Log performance metrics periodically
+        if fps_counter % 60 == 0:  # Every 60 frames
+            perf_msg = f"Performance - FPS: {display_fps}, Packets: {stats['packet_count']}, Errors: {stats['packet_errors']}, Latency: {ctr_data.avg_latency:.1f}ms"
+            if PSUTIL_AVAILABLE:
+                perf_msg += f", Memory: {memory_usage:.1f}MB, CPU: {cpu_usage:.1f}%"
+            self.log_to_terminal(perf_msg, "INFO")
+    
+    def open_data_folder(self):
+        """Open the data folder in file explorer"""
+        data_dir = "data"
+        if not os.path.exists(data_dir):
+            os.makedirs(data_dir)
+        
+        try:
+            # Open folder in file explorer
+            if os.name == 'nt':  # Windows
+                os.startfile(data_dir)
+            elif os.name == 'posix':  # macOS and Linux
+                import subprocess
+                subprocess.run(['open', data_dir] if os.uname().sysname == 'Darwin' else ['xdg-open', data_dir])
+            
+            self.log_to_terminal(f"Opened data folder: {os.path.abspath(data_dir)}", "INFO")
+        except Exception as e:
+            self.log_to_terminal(f"Failed to open data folder: {e}", "ERROR")
+            messagebox.showerror("Error", f"Failed to open data folder: {e}")
+    
+    def show_packet_inspector(self):
+        """Show packet inspector window"""
+        if not packet_inspector.current_packet:
+            messagebox.showinfo("No Data", "No packets received yet")
+            return
+        
+        # Create packet inspector window
+        inspector_window = tk.Toplevel(self.root)
+        inspector_window.title("Packet Inspector")
+        inspector_window.geometry("800x600")
+        inspector_window.configure(bg=COLORS['bg_dark'])
+        
+        # Create notebook for tabs
+        notebook = ttk.Notebook(inspector_window)
+        notebook.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # Current packet tab
+        current_frame = tk.Frame(notebook, bg=COLORS['bg_dark'])
+        notebook.add(current_frame, text="Current Packet")
+        
+        # Packet details
+        packet = packet_inspector.current_packet
+        details_text = scrolledtext.ScrolledText(
+            current_frame, bg=COLORS['bg_dark'], fg=COLORS['text_primary'],
+            font=FONTS['mono'], height=20
+        )
+        details_text.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # Format packet details
+        details = f"""Packet Analysis Report
+{'='*50}
+
+Timestamp: {packet['timestamp']}
+Valid: {packet['valid']}
+Index: {packet['index']}
+Checksum Valid: {packet['checksum_valid']}
+Checksum: {packet['checksum']} (Expected: {packet['expected_checksum']})
+Reserved: {packet['reserved']}
+
+Raw Data: {packet['raw_data']}
+
+Parsed Data:
+"""
+        
+        for key, value in packet['parsed_data'].items():
+            if isinstance(value, dict):
+                details += f"\n{key}:\n"
+                for subkey, subvalue in value.items():
+                    details += f"  {subkey}: {subvalue}\n"
+            else:
+                details += f"{key}: {value}\n"
+        
+        details_text.insert(tk.END, details)
+        details_text.config(state='disabled')
+        
+        # Statistics tab
+        stats_frame = tk.Frame(notebook, bg=COLORS['bg_dark'])
+        notebook.add(stats_frame, text="Statistics")
+        
+        stats_text = scrolledtext.ScrolledText(
+            stats_frame, bg=COLORS['bg_dark'], fg=COLORS['text_primary'],
+            font=FONTS['mono'], height=20
+        )
+        stats_text.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # Format statistics
+        stats = packet_inspector.get_packet_statistics()
+        stats_details = f"""Packet Statistics
+{'='*50}
+
+Total Packets: {stats.get('total_packets', 0)}
+Valid Packets: {stats.get('valid_packets', 0)}
+Checksum Errors: {stats.get('checksum_errors', 0)}
+Error Rate: {stats.get('error_rate', 0):.2%}
+
+Index Distribution:
+"""
+        
+        for index, count in stats.get('index_distribution', {}).items():
+            stats_details += f"  Index {index}: {count} packets\n"
+        
+        stats_text.insert(tk.END, stats_details)
+        stats_text.config(state='disabled')
+        
+        # Recent packets tab
+        recent_frame = tk.Frame(notebook, bg=COLORS['bg_dark'])
+        notebook.add(recent_frame, text="Recent Packets")
+        
+        recent_text = scrolledtext.ScrolledText(
+            recent_frame, bg=COLORS['bg_dark'], fg=COLORS['text_primary'],
+            font=FONTS['mono'], height=20
+        )
+        recent_text.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # Format recent packets
+        recent_packets = packet_inspector.get_recent_packets(20)
+        recent_details = "Recent Packets (Last 20)\n" + "="*50 + "\n\n"
+        
+        for i, packet in enumerate(reversed(recent_packets)):
+            recent_details += f"Packet {len(recent_packets) - i}:\n"
+            recent_details += f"  Time: {packet['timestamp']}\n"
+            recent_details += f"  Index: {packet['index']}\n"
+            recent_details += f"  Valid: {packet['valid']}\n"
+            recent_details += f"  Raw: {packet['raw_data']}\n"
+            if packet['valid']:
+                recent_details += f"  Checksum: {packet['checksum_valid']}\n"
+            recent_details += "\n"
+        
+        recent_text.insert(tk.END, recent_details)
+        recent_text.config(state='disabled')
+    
     def log_to_terminal(self, message, level="INFO"):
         """Add a message to the terminal with timestamp and level"""
         global terminal_paused
@@ -870,8 +1596,13 @@ class EKSRDisplayEnhanced:
         elif level == "SUCCESS":
             tag = "success"
         
-        # Store current search state
-        current_search_text = self.search_entry.get().strip() if self.search_entry else ""
+        # Store current search state - safely check if search_entry exists
+        current_search_text = ""
+        if hasattr(self, 'search_entry') and self.search_entry:
+            try:
+                current_search_text = self.search_entry.get().strip()
+            except (tk.TclError, AttributeError):
+                current_search_text = ""
         
         self.terminal.insert(tk.END, formatted_message, tag)
         
@@ -880,14 +1611,14 @@ class EKSRDisplayEnhanced:
         
         # Limit terminal size to prevent memory issues
         lines = self.terminal.get(1.0, tk.END).split('\n')
-        if len(lines) > 1000:
-            self.terminal.delete(1.0, f"{len(lines) - 500}.0")
+        if len(lines) > settings['terminal_max_lines']:
+            self.terminal.delete(1.0, f"{len(lines) - settings['terminal_max_lines']//2}.0")
             # Re-apply search highlighting after content deletion
-            if current_search_text and self.search_active:
+            if current_search_text and hasattr(self, 'search_active') and self.search_active:
                 self.perform_search()
         
         # Apply search highlighting to new content if search is active
-        if current_search_text and self.search_active:
+        if current_search_text and hasattr(self, 'search_active') and self.search_active:
             # Find and highlight any matches in the new content
             start_pos = f"{len(lines) - 1}.0"
             while True:
@@ -946,6 +1677,9 @@ class EKSRDisplayEnhanced:
         current_time = datetime.now().strftime("%H:%M:%S")
         self.time_label.config(text=current_time)
         
+        # Update performance monitoring
+        self.update_performance_display()
+        
         # If paused, only update time and schedule next update
         if terminal_paused:
             # Schedule next update
@@ -994,8 +1728,10 @@ class EKSRDisplayEnhanced:
             # Update gear
             self.gear_label.config(text=f"{ctr_data.gear}")
         
-        # Update connection buttons
-        self.update_connection_buttons()
+        # Update connection buttons (less frequently)
+        if not hasattr(self, '_last_button_update') or time.time() - self._last_button_update > 0.5:
+            self.update_connection_buttons()
+            self._last_button_update = time.time()
         
         # Update info panel (always check)
         if terminal_paused:
@@ -1047,18 +1783,222 @@ class EKSRDisplayEnhanced:
         if fill_width > 0:
             self.battery_bar.create_rectangle(x_start + 2, 4, x_start + 2 + fill_width, bar_height, 
                                             fill=color, outline='')
+    
+    def show_settings(self):
+        """Show settings panel"""
+        # Create settings window
+        settings_window = tk.Toplevel(self.root)
+        settings_window.title("Settings")
+        settings_window.geometry("500x600")
+        settings_window.configure(bg=COLORS['bg_dark'])
+        
+        # Create main frame
+        main_frame = tk.Frame(settings_window, bg=COLORS['bg_dark'])
+        main_frame.pack(fill='both', expand=True, padx=20, pady=20)
+        
+        # Title
+        tk.Label(main_frame, text="Display Settings", 
+                font=FONTS['title'], fg=COLORS['text_primary'], 
+                bg=COLORS['bg_dark']).pack(pady=(0, 20))
+        
+        # Create settings sections
+        self.create_display_settings(main_frame)
+        self.create_recording_settings(main_frame)
+        self.create_debug_settings(main_frame)
+        
+        # Buttons
+        button_frame = tk.Frame(main_frame, bg=COLORS['bg_dark'])
+        button_frame.pack(fill='x', pady=20)
+        
+        ModernButton(button_frame, text="Save", 
+                    bg=COLORS['success'], fg=COLORS['text_primary'],
+                    command=lambda: self.save_settings(settings_window)).pack(side='left', padx=5)
+        
+        ModernButton(button_frame, text="Cancel", 
+                    bg=COLORS['bg_light'], fg=COLORS['text_primary'],
+                    command=settings_window.destroy).pack(side='right', padx=5)
+    
+    def create_display_settings(self, parent):
+        """Create display settings section"""
+        frame = tk.LabelFrame(parent, text="Display", 
+                             font=FONTS['subheading'], fg=COLORS['text_primary'],
+                             bg=COLORS['bg_dark'], relief='flat', bd=1)
+        frame.pack(fill='x', pady=10)
+        
+        # Display FPS
+        fps_frame = tk.Frame(frame, bg=COLORS['bg_dark'])
+        fps_frame.pack(fill='x', padx=10, pady=5)
+        
+        tk.Label(fps_frame, text="Display FPS:", 
+                font=FONTS['body'], fg=COLORS['text_primary'], 
+                bg=COLORS['bg_dark']).pack(side='left')
+        
+        self.fps_var = tk.StringVar(value=str(settings['display_fps']))
+        fps_entry = tk.Entry(fps_frame, textvariable=self.fps_var, 
+                           bg=COLORS['bg_medium'], fg=COLORS['text_primary'],
+                           font=FONTS['body'], width=10)
+        fps_entry.pack(side='right')
+        
+        # Gauge Animation FPS
+        gauge_fps_frame = tk.Frame(frame, bg=COLORS['bg_dark'])
+        gauge_fps_frame.pack(fill='x', padx=10, pady=5)
+        
+        tk.Label(gauge_fps_frame, text="Gauge Animation FPS:", 
+                font=FONTS['body'], fg=COLORS['text_primary'], 
+                bg=COLORS['bg_dark']).pack(side='left')
+        
+        self.gauge_fps_var = tk.StringVar(value=str(settings['gauge_animation_fps']))
+        gauge_fps_entry = tk.Entry(gauge_fps_frame, textvariable=self.gauge_fps_var, 
+                                 bg=COLORS['bg_medium'], fg=COLORS['text_primary'],
+                                 font=FONTS['body'], width=10)
+        gauge_fps_entry.pack(side='right')
+        
+        # Terminal max lines
+        terminal_frame = tk.Frame(frame, bg=COLORS['bg_dark'])
+        terminal_frame.pack(fill='x', padx=10, pady=5)
+        
+        tk.Label(terminal_frame, text="Terminal Max Lines:", 
+                font=FONTS['body'], fg=COLORS['text_primary'], 
+                bg=COLORS['bg_dark']).pack(side='left')
+        
+        self.terminal_lines_var = tk.StringVar(value=str(settings['terminal_max_lines']))
+        terminal_entry = tk.Entry(terminal_frame, textvariable=self.terminal_lines_var, 
+                                bg=COLORS['bg_medium'], fg=COLORS['text_primary'],
+                                font=FONTS['body'], width=10)
+        terminal_entry.pack(side='right')
+    
+    def create_recording_settings(self, parent):
+        """Create recording settings section"""
+        frame = tk.LabelFrame(parent, text="Recording", 
+                             font=FONTS['subheading'], fg=COLORS['text_primary'],
+                             bg=COLORS['bg_dark'], relief='flat', bd=1)
+        frame.pack(fill='x', pady=10)
+        
+        # Auto record
+        auto_record_frame = tk.Frame(frame, bg=COLORS['bg_dark'])
+        auto_record_frame.pack(fill='x', padx=10, pady=5)
+        
+        self.auto_record_var = tk.BooleanVar(value=settings['auto_record'])
+        auto_record_check = tk.Checkbutton(auto_record_frame, text="Auto-record on connection", 
+                                          variable=self.auto_record_var,
+                                          font=FONTS['body'], fg=COLORS['text_primary'],
+                                          bg=COLORS['bg_dark'], selectcolor=COLORS['bg_medium'])
+        auto_record_check.pack(side='left')
+        
+        # Auto save
+        auto_save_frame = tk.Frame(frame, bg=COLORS['bg_dark'])
+        auto_save_frame.pack(fill='x', padx=10, pady=5)
+        
+        self.auto_save_var = tk.BooleanVar(value=settings['auto_save'])
+        auto_save_check = tk.Checkbutton(auto_save_frame, text="Auto-save CSV files", 
+                                        variable=self.auto_save_var,
+                                        font=FONTS['body'], fg=COLORS['text_primary'],
+                                        bg=COLORS['bg_dark'], selectcolor=COLORS['bg_medium'])
+        auto_save_check.pack(side='left')
+        
+        # Record interval
+        interval_frame = tk.Frame(frame, bg=COLORS['bg_dark'])
+        interval_frame.pack(fill='x', padx=10, pady=5)
+        
+        tk.Label(interval_frame, text="Record Interval (s):", 
+                font=FONTS['body'], fg=COLORS['text_primary'], 
+                bg=COLORS['bg_dark']).pack(side='left')
+        
+        self.interval_var = tk.StringVar(value=str(settings['record_interval']))
+        interval_entry = tk.Entry(interval_frame, textvariable=self.interval_var, 
+                                bg=COLORS['bg_medium'], fg=COLORS['text_primary'],
+                                font=FONTS['body'], width=10)
+        interval_entry.pack(side='right')
+    
+    def create_debug_settings(self, parent):
+        """Create debug settings section"""
+        frame = tk.LabelFrame(parent, text="Debug", 
+                             font=FONTS['subheading'], fg=COLORS['text_primary'],
+                             bg=COLORS['bg_dark'], relief='flat', bd=1)
+        frame.pack(fill='x', pady=10)
+        
+        # Show performance
+        perf_frame = tk.Frame(frame, bg=COLORS['bg_dark'])
+        perf_frame.pack(fill='x', padx=10, pady=5)
+        
+        self.show_perf_var = tk.BooleanVar(value=settings['show_performance'])
+        perf_check = tk.Checkbutton(perf_frame, text="Show performance metrics", 
+                                   variable=self.show_perf_var,
+                                   font=FONTS['body'], fg=COLORS['text_primary'],
+                                   bg=COLORS['bg_dark'], selectcolor=COLORS['bg_medium'])
+        perf_check.pack(side='left')
+        
+        # Show packet details
+        packet_frame = tk.Frame(frame, bg=COLORS['bg_dark'])
+        packet_frame.pack(fill='x', padx=10, pady=5)
+        
+        self.show_packet_var = tk.BooleanVar(value=settings['show_packet_details'])
+        packet_check = tk.Checkbutton(packet_frame, text="Show detailed packet info", 
+                                     variable=self.show_packet_var,
+                                     font=FONTS['body'], fg=COLORS['text_primary'],
+                                     bg=COLORS['bg_dark'], selectcolor=COLORS['bg_medium'])
+        packet_check.pack(side='left')
+    
+    def save_settings(self, window):
+        """Save settings and close window"""
+        try:
+            # Update settings from UI
+            settings['display_fps'] = int(self.fps_var.get())
+            settings['gauge_animation_fps'] = int(self.gauge_fps_var.get())
+            settings['terminal_max_lines'] = int(self.terminal_lines_var.get())
+            settings['auto_record'] = self.auto_record_var.get()
+            settings['auto_save'] = self.auto_save_var.get()
+            settings['record_interval'] = float(self.interval_var.get())
+            settings['show_performance'] = self.show_perf_var.get()
+            settings['show_packet_details'] = self.show_packet_var.get()
+            
+            # Save to file
+            with open('eksr_settings.json', 'w') as f:
+                json.dump(settings, f, indent=2)
+            
+            # Update UI to reflect new settings
+            self.update_recording_info()
+            
+            self.log_to_terminal("Settings saved successfully", "SUCCESS")
+            window.destroy()
+            
+        except ValueError as e:
+            messagebox.showerror("Invalid Value", f"Please enter valid numbers: {e}")
+        except Exception as e:
+            messagebox.showerror("Save Error", f"Failed to save settings: {e}")
+    
+    def load_settings(self):
+        """Load settings from file"""
+        try:
+            if os.path.exists('eksr_settings.json'):
+                with open('eksr_settings.json', 'r') as f:
+                    loaded_settings = json.load(f)
+                    settings.update(loaded_settings)
+                self.log_to_terminal("Settings loaded from file", "INFO")
+                
+                # Update UI to reflect loaded settings
+                self.update_recording_info()
+        except Exception as e:
+            self.log_to_terminal(f"Failed to load settings: {e}", "WARNING")
 
 def message_handler(data):
     """Process incoming BLE data packets"""
     global ctr_data, is_connected
     
+    packet_start_time = time.time()
+    
+    # Analyze packet with inspector
+    packet_info = packet_inspector.analyze_packet(data)
+    
     if len(data) < 16:
         log_to_terminal(f"Invalid packet length: {len(data)}", "ERROR")
+        ctr_data.packet_errors += 1
         return
     
     # Check for 0xAA header
     if data[0] != 0xAA:
         log_to_terminal(f"Invalid header: 0x{data[0]:02X}", "ERROR")
+        ctr_data.packet_errors += 1
         return
     
     index = data[1]
@@ -1069,9 +2009,17 @@ def message_handler(data):
         is_connected = True
         log_to_terminal("Connection status updated - data received", "INFO")
     
-    # Log raw data to terminal
+    # Log raw data to terminal - display exactly as received from FarDriver
     hex_data = ' '.join([f"{b:02X}" for b in data])
-    log_to_terminal(f"Raw: {hex_data}", "DATA")
+    log_to_terminal(f"DATA: {hex_data}", "DATA")
+    
+    # Log detailed packet info if enabled
+    if settings['show_packet_details'] and packet_info['valid']:
+        log_to_terminal(f"Packet {index}: {packet_info['parsed_data']}", "INFO")
+    
+    # Calculate latency
+    latency = (time.time() - packet_start_time) * 1000  # Convert to ms
+    ctr_data.update_performance_metrics(packet_start_time, latency)
     
     # Process different packet types
     if index == 0:  # Main data

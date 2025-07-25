@@ -64,6 +64,16 @@ This enhanced version of the EKSR Instrument PC Display provides a modern, polis
 - **Pause/Resume**: Control terminal output
 - **Auto-scroll**: Automatic scrolling to latest messages
 - **Message Filtering**: Limit message history to prevent memory issues
+- **Search Functionality**: Search through terminal content with highlighting
+- **Packet Inspector**: Detailed packet analysis and statistics
+
+### Data Recording
+- **Auto-Save CSV**: Data is automatically saved to CSV files during recording
+- **Organized Storage**: All data files saved in dedicated `data/` directory
+- **Timestamped Files**: Automatic filename generation with timestamps
+- **Data Folder Access**: Quick access to data directory via folder button
+- **Settings Control**: Auto-save option available in settings
+- **Multiple Formats**: Support for CSV and JSON export formats
 
 ## Installation
 
@@ -84,6 +94,38 @@ python pc_display_enhanced.py
 3. **Monitor Data**: View real-time data through the various gauges and displays
 4. **Terminal Logging**: Monitor raw data packets in the terminal panel
 5. **Control Display**: Use pause/resume and clear controls as needed
+6. **Record Data**: Click "Start Recording" to begin auto-saving data to CSV files
+7. **Access Data**: Click the folder button (📁) to open the data directory
+
+## Data Directory Structure
+
+The application automatically creates and manages a `data/` directory for all recorded files:
+
+```
+pc_display/
+├── data/                          # Data storage directory
+│   ├── eksr_data_20250725_143307.csv
+│   ├── eksr_data_20250725_143353.csv
+│   └── eksr_data_20250725_143400.json
+├── pc_display_enhanced.py         # Main application
+├── requirements_enhanced.txt      # Dependencies
+└── README.md                      # Documentation
+```
+
+### Data File Format
+
+CSV files contain the following columns:
+- **Timestamp**: ISO format timestamp
+- **Throttle**: Throttle position (0-4095)
+- **Gear**: Current gear (1-3)
+- **RPM**: Engine RPM
+- **Controller_Temp_C**: Controller temperature in Celsius
+- **Motor_Temp_C**: Motor temperature in Celsius
+- **Speed_kmh**: Calculated speed in km/h
+- **Power_W**: Power output in watts
+- **Voltage_V**: Battery voltage
+- **Packet_Count**: Total packets received
+- **Latency_ms**: Average packet latency
 
 ## Technical Improvements
 
