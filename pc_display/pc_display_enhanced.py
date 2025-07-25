@@ -477,7 +477,13 @@ def log_to_terminal(message, level="INFO"):
     """Global function to log messages to terminal"""
     global terminal_paused
     if terminal_widget and hasattr(terminal_widget, 'log_to_terminal') and not terminal_paused:
-        terminal_widget.log_to_terminal(message, level)
+        # Check if message should be shown based on filters
+        if hasattr(terminal_widget, 'should_show_message'):
+            if terminal_widget.should_show_message(level, message):
+                terminal_widget.log_to_terminal(message, level)
+        else:
+            # Fallback if filter system not available
+            terminal_widget.log_to_terminal(message, level)
 
 class ModernButton(tk.Button):
     """Custom modern button with hover effects"""
@@ -561,6 +567,71 @@ class ModernButton(tk.Button):
                 return COLORS['bg_lighter']
         except:
             # Fallback to default darker color
+            return COLORS['bg_lighter']
+
+class ModernCheckbox(tk.Checkbutton):
+    """Custom modern checkbox with hover effects"""
+    def __init__(self, parent, **kwargs):
+        # Store original background color if provided
+        self.original_bg = kwargs.get('bg', COLORS['bg_medium'])
+        self._is_hovered = False
+        
+        super().__init__(parent, **kwargs)
+        self.config(
+            relief='flat',
+            borderwidth=0,
+            font=FONTS['body'],
+            cursor='hand2',
+            bg=self.original_bg,
+            fg=COLORS['text_primary'],
+            selectcolor=COLORS['bg_dark'],
+            activebackground=self.original_bg,
+            activeforeground=COLORS['text_primary'],
+            offrelief='flat',
+            overrelief='flat'
+        )
+        self.bind('<Enter>', self.on_enter)
+        self.bind('<Leave>', self.on_leave)
+    
+    def on_enter(self, event):
+        """Handle mouse enter"""
+        if self['state'] != 'disabled':
+            self._is_hovered = True
+            try:
+                hover_bg = self._lighten_color(self.original_bg)
+                self.config(bg=hover_bg, activebackground=hover_bg)
+            except tk.TclError:
+                pass
+    
+    def on_leave(self, event):
+        """Handle mouse leave"""
+        if self['state'] != 'disabled':
+            self._is_hovered = False
+            try:
+                self.config(bg=self.original_bg, activebackground=self.original_bg)
+            except tk.TclError:
+                pass
+    
+    def _lighten_color(self, color):
+        """Create a darker version of the given color for hover effects"""
+        try:
+            if color.startswith('#'):
+                hex_color = color[1:]
+                if len(hex_color) == 3:
+                    hex_color = ''.join([c*2 for c in hex_color])
+                
+                r = int(hex_color[0:2], 16)
+                g = int(hex_color[2:4], 16)
+                b = int(hex_color[4:6], 16)
+                
+                r = max(0, int(r * 0.85))
+                g = max(0, int(g * 0.85))
+                b = max(0, int(b * 0.85))
+                
+                return f'#{r:02x}{g:02x}{b:02x}'
+            else:
+                return COLORS['bg_lighter']
+        except:
             return COLORS['bg_lighter']
 
 class GradientCanvas(tk.Canvas):
@@ -684,6 +755,25 @@ class EKSRDisplayEnhanced:
         self.root.grid_rowconfigure(0, weight=1)
         self.root.grid_columnconfigure(1, weight=1)
         
+        # Initialize terminal filter settings (before creating UI)
+        self.terminal_filters = {
+            'show_info': tk.BooleanVar(value=True),
+            'show_warning': tk.BooleanVar(value=True),
+            'show_error': tk.BooleanVar(value=True),
+            'show_success': tk.BooleanVar(value=True),
+            'show_data': tk.BooleanVar(value=True),
+            'show_connection': tk.BooleanVar(value=True),
+            'show_recording': tk.BooleanVar(value=True),
+            'show_performance': tk.BooleanVar(value=True)
+        }
+        
+        # Initialize search variables
+        self.search_active = False
+        self.search_frame = None
+        self.search_entry = None
+        self.search_results = []
+        self.current_search_index = -1
+        
         # Create sidebar
         self.create_sidebar()
         
@@ -699,13 +789,6 @@ class EKSRDisplayEnhanced:
         
         # Load settings
         self.load_settings()
-        
-        # Initialize search variables
-        self.search_active = False
-        self.search_frame = None
-        self.search_entry = None
-        self.search_results = []
-        self.current_search_index = -1
         
         # Start update loop
         self.update_display()
@@ -880,7 +963,7 @@ class EKSRDisplayEnhanced:
         
         # Data folder button
         self.data_folder_btn = ModernButton(controls_frame, text="📁", 
-                                          bg=COLORS['accent_green'], fg=COLORS['text_primary'],
+                                          bg=COLORS['btn_success'], fg=COLORS['text_primary'],
                                           command=self.open_data_folder)
         self.data_folder_btn.pack(side='left', padx=2)
         
@@ -903,7 +986,57 @@ class EKSRDisplayEnhanced:
         self.terminal.tag_configure("info", foreground=COLORS['info'])
         self.terminal.tag_configure("success", foreground=COLORS['success'])
         self.terminal.tag_configure("data", foreground=COLORS['accent_green'])
-        self.terminal.tag_configure("search_highlight", background=COLORS['accent_orange'], foreground=COLORS['text_primary'])
+        self.terminal.tag_configure("search_highlight", background=COLORS['warning'], foreground=COLORS['text_primary'])
+    
+
+    
+    def update_terminal_filters(self):
+        """Update terminal display based on filter settings"""
+        # This will be called when checkboxes are toggled
+        # For now, we'll just log the current filter state
+        active_filters = [key for key, var in self.terminal_filters.items() if var.get()]
+        self.log_to_terminal(f"Terminal filters updated: {', '.join(active_filters)}", "INFO")
+    
+    def should_show_message(self, level, message):
+        """Determine if a message should be shown based on filter settings"""
+        # Always show filter update messages to avoid confusion
+        if "Terminal filters updated" in message:
+            return True
+        
+        # Check level-based filters
+        if level == "INFO":
+            return self.terminal_filters['show_info'].get()
+        elif level == "WARNING":
+            return self.terminal_filters['show_warning'].get()
+        elif level == "ERROR":
+            return self.terminal_filters['show_error'].get()
+        elif level == "SUCCESS":
+            return self.terminal_filters['show_success'].get()
+        elif level == "DATA":
+            return self.terminal_filters['show_data'].get()
+        
+        # Check content-based filters
+        if "connected" in message.lower() or "disconnected" in message.lower():
+            return self.terminal_filters['show_connection'].get()
+        elif "recording" in message.lower() or "recorded" in message.lower():
+            return self.terminal_filters['show_recording'].get()
+        elif "fps" in message.lower() or "latency" in message.lower() or "performance" in message.lower():
+            return self.terminal_filters['show_performance'].get()
+        
+        # Default to showing if no specific filter applies
+        return True
+    
+    def select_all_filters(self):
+        """Select all terminal filters"""
+        for var in self.terminal_filters.values():
+            var.set(True)
+        self.log_to_terminal("All terminal filters enabled", "INFO")
+    
+    def clear_all_filters(self):
+        """Clear all terminal filters"""
+        for var in self.terminal_filters.values():
+            var.set(False)
+        self.log_to_terminal("All terminal filters disabled", "INFO")
     
     def create_main_content(self):
         """Create the main content area with gauges and displays"""
@@ -1626,6 +1759,10 @@ Index Distribution:
         # Don't log if terminal is paused (except for pause/resume messages)
         if terminal_paused and "Display paused" not in message and "Display resumed" not in message:
             return
+        
+        # Check filter settings
+        if not self.should_show_message(level, message):
+            return
             
         timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
         formatted_message = f"[{timestamp}] {level}: {message}\n"
@@ -1849,6 +1986,7 @@ Index Distribution:
         # Create settings sections
         self.create_display_settings(main_frame)
         self.create_recording_settings(main_frame)
+        self.create_terminal_settings(main_frame)
         self.create_debug_settings(main_frame)
         
         # Buttons
@@ -1954,6 +2092,61 @@ Index Distribution:
                                 bg=COLORS['bg_medium'], fg=COLORS['text_primary'],
                                 font=FONTS['body'], width=10)
         interval_entry.pack(side='right')
+    
+    def create_terminal_settings(self, parent):
+        """Create terminal settings section"""
+        frame = tk.LabelFrame(parent, text="Terminal Filters", 
+                             font=FONTS['subheading'], fg=COLORS['text_primary'],
+                             bg=COLORS['bg_dark'], relief='flat', bd=1)
+        frame.pack(fill='x', pady=10)
+        
+        # Filter control buttons
+        filter_controls = tk.Frame(frame, bg=COLORS['bg_dark'])
+        filter_controls.pack(fill='x', padx=10, pady=5)
+        
+        select_all_btn = ModernButton(filter_controls, text="Select All", 
+                                     bg=COLORS['btn_primary'], fg=COLORS['text_primary'],
+                                     command=self.select_all_filters)
+        select_all_btn.pack(side='left', padx=2)
+        
+        clear_all_btn = ModernButton(filter_controls, text="Clear All", 
+                                    bg=COLORS['btn_danger'], fg=COLORS['text_primary'],
+                                    command=self.clear_all_filters)
+        clear_all_btn.pack(side='left', padx=2)
+        
+        # Filter checkboxes in two columns
+        checkbox_frame = tk.Frame(frame, bg=COLORS['bg_dark'])
+        checkbox_frame.pack(fill='x', padx=10, pady=5)
+        
+        # Left column
+        left_column = tk.Frame(checkbox_frame, bg=COLORS['bg_dark'])
+        left_column.pack(side='left', fill='x', expand=True)
+        
+        # Right column
+        right_column = tk.Frame(checkbox_frame, bg=COLORS['bg_dark'])
+        right_column.pack(side='right', fill='x', expand=True)
+        
+        # Create checkboxes
+        filters = [
+            ('show_info', 'Info Messages', left_column),
+            ('show_warning', 'Warnings', left_column),
+            ('show_error', 'Errors', left_column),
+            ('show_success', 'Success', left_column),
+            ('show_data', 'Data Updates', right_column),
+            ('show_connection', 'Connection', right_column),
+            ('show_recording', 'Recording', right_column),
+            ('show_performance', 'Performance', right_column)
+        ]
+        
+        for filter_key, label, column in filters:
+            checkbox = ModernCheckbox(
+                column,
+                text=label,
+                variable=self.terminal_filters[filter_key],
+                bg=COLORS['bg_dark'],
+                command=self.update_terminal_filters
+            )
+            checkbox.pack(anchor='w', pady=1)
     
     def create_debug_settings(self, parent):
         """Create debug settings section"""
