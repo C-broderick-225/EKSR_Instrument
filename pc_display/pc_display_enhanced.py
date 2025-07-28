@@ -48,6 +48,11 @@ import gc
 FARDRIVER_SERVICE_UUID = "ffe0"
 FARDRIVER_CHARACTERISTIC_UUID = "ffec"
 
+# YuanQu device configuration
+YUANQU_DEVICE_NAME = "YuanQuFOC982"
+YUANQU_SERVICE_UUID = "ffe0"
+YUANQU_CHARACTERISTIC_UUID = "ffec"
+
 # Color scheme and styling - Modern 2024 Design System
 COLORS = {
     # Background colors - Modern dark theme with better contrast
@@ -451,6 +456,9 @@ client = None
 terminal_widget = None
 terminal_paused = False
 should_disconnect = False
+display_instance = None  # Reference to the display instance
+ble_thread = None  # BLE scanning thread
+ble_thread_running = False  # Track if BLE thread is running
 
 # Performance monitoring
 fps_counter = 0
@@ -850,6 +858,9 @@ class EKSRDisplayEnhanced:
         # Update button states
         self.update_connection_buttons()
         
+        # BLE Device List
+        self.create_ble_device_section()
+        
         # Recording controls
         self.create_recording_section()
         
@@ -885,6 +896,134 @@ class EKSRDisplayEnhanced:
                                       bg=COLORS['btn_success'], fg=COLORS['text_primary'],
                                       command=self.toggle_recording)
         self.record_btn.pack(fill='x')
+    
+    def create_ble_device_section(self):
+        """Create BLE device list section"""
+        device_frame = tk.Frame(self.sidebar, bg=COLORS['bg_medium'])
+        device_frame.pack(fill='x', padx=10, pady=(0, 10))
+        
+        # Device list header
+        device_header = tk.Frame(device_frame, bg=COLORS['bg_medium'])
+        device_header.pack(fill='x', pady=(0, 5))
+        
+        tk.Label(device_header, text="BLE Devices", 
+                font=FONTS['subheading'], fg=COLORS['text_primary'], 
+                bg=COLORS['bg_medium']).pack(side='left')
+        
+        # Refresh button
+        self.refresh_btn = ModernButton(device_header, text="🔄", 
+                                      bg=COLORS['info'], fg=COLORS['text_primary'],
+                                      command=self.refresh_device_list, width=3)
+        self.refresh_btn.pack(side='right', padx=(5, 0))
+        
+        # Device list container with scrollbar
+        list_container = tk.Frame(device_frame, bg=COLORS['bg_medium'])
+        list_container.pack(fill='both', expand=True)
+        
+        # Create a frame for the listbox and scrollbar
+        list_frame = tk.Frame(list_container, bg=COLORS['bg_medium'])
+        list_frame.pack(fill='both', expand=True)
+        
+        # Device listbox
+        self.device_listbox = tk.Listbox(list_frame, 
+                                        bg=COLORS['bg_light'], 
+                                        fg=COLORS['text_primary'],
+                                        selectbackground=COLORS['primary'],
+                                        selectforeground=COLORS['text_primary'],
+                                        font=FONTS['mono'],
+                                        height=6,
+                                        relief='flat',
+                                        borderwidth=0)
+        self.device_listbox.pack(side='left', fill='both', expand=True)
+        
+        # Scrollbar for device list
+        device_scrollbar = tk.Scrollbar(list_frame, orient='vertical', 
+                                       command=self.device_listbox.yview)
+        device_scrollbar.pack(side='right', fill='y')
+        self.device_listbox.config(yscrollcommand=device_scrollbar.set)
+        
+        # Connected device info
+        self.connected_device_frame = tk.Frame(device_frame, bg=COLORS['bg_medium'])
+        self.connected_device_frame.pack(fill='x', pady=(5, 0))
+        
+        self.connected_device_label = tk.Label(self.connected_device_frame, 
+                                             text="Not connected", 
+                                             font=FONTS['body'], 
+                                             fg=COLORS['text_muted'], 
+                                             bg=COLORS['bg_medium'])
+        self.connected_device_label.pack(side='left')
+        
+        # Initialize device list
+        self.devices = []
+        self.refresh_device_list()
+    
+    def refresh_device_list(self):
+        """Refresh the BLE device list"""
+        def scan_devices():
+            try:
+                import asyncio
+                from bleak import BleakScanner
+                
+                async def scan():
+                    devices = await BleakScanner.discover(timeout=5.0)
+                    return devices
+                
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                devices = loop.run_until_complete(scan())
+                loop.close()
+                
+                # Update the device list in the main thread
+                self.root.after(0, self.update_device_list, devices)
+                
+            except Exception as e:
+                self.log_to_terminal(f"Error scanning for devices: {e}", "ERROR")
+        
+        # Run scan in a separate thread
+        import threading
+        scan_thread = threading.Thread(target=scan_devices, daemon=True)
+        scan_thread.start()
+    
+    def update_device_list(self, devices):
+        """Update the device listbox with discovered devices"""
+        self.devices = devices
+        self.device_listbox.delete(0, tk.END)
+        
+        if not devices:
+            self.device_listbox.insert(tk.END, "No devices found")
+            return
+        
+        for device in devices:
+            name = device.name or "Unknown"
+            address = device.address
+            rssi = getattr(device, 'rssi', 'N/A')
+            
+            # Highlight supported devices
+            if "FarDriver" in name or YUANQU_DEVICE_NAME in name:
+                display_text = f"🎯 {name}"
+            else:
+                display_text = f"   {name}"
+            
+            display_text += f" ({address})"
+            if rssi != 'N/A':
+                display_text += f" [{rssi}dBm]"
+            
+            self.device_listbox.insert(tk.END, display_text)
+        
+        self.log_to_terminal(f"Found {len(devices)} BLE device(s)", "INFO")
+    
+    def update_connected_device_label(self, device_name=None, device_address=None, device_type=None):
+        """Update the connected device label"""
+        if device_name and device_address and device_type:
+            self.connected_device_label.config(
+                text=f"Connected: {device_name} ({device_address})",
+                fg=COLORS['success']
+            )
+        else:
+            self.connected_device_label.config(
+                text="Not connected",
+                fg=COLORS['text_muted']
+            )
     
     def create_performance_section(self):
         """Create performance monitoring section"""
@@ -1190,7 +1329,7 @@ class EKSRDisplayEnhanced:
         info_frame.grid(row=2, column=0, columnspan=3, padx=10, pady=10, sticky='ew')
         
         # Info labels
-        self.info_label = tk.Label(info_frame, text="Ready to connect...", 
+        self.info_label = tk.Label(info_frame, text="Click 'Connect' to start BLE scanning...", 
                                  font=FONTS['body'], fg=COLORS['text_secondary'], 
                                  bg=COLORS['bg_medium'])
         self.info_label.pack(pady=5)
@@ -1242,20 +1381,28 @@ class EKSRDisplayEnhanced:
     
     def toggle_connection(self):
         """Toggle connection status - connect or disconnect from BLE device"""
-        global is_connected, should_disconnect, client
+        global is_connected, should_disconnect, client, ble_thread, ble_thread_running
         
         if is_connected:
             # Disconnect
             self.disconnect_device()
         else:
-            # Connect - reset disconnect flag to allow reconnection
-            log_to_terminal("Manual connect requested", "INFO")
-            should_disconnect = False
+            # Connect - start BLE scanning if not already running
+            if not ble_thread_running:
+                log_to_terminal("Starting BLE scanning...", "INFO")
+                should_disconnect = False
+                ble_thread = threading.Thread(target=run_ble_loop, daemon=True)
+                ble_thread.start()
+                ble_thread_running = True
+            else:
+                log_to_terminal("Manual connect requested", "INFO")
+                should_disconnect = False
+            
             self.connect_btn.config(state='disabled', text="Connecting...")
     
     def disconnect_device(self):
         """Disconnect from the BLE device"""
-        global is_connected, should_disconnect, client
+        global is_connected, should_disconnect, client, ble_thread_running
         
         log_to_terminal("Manual disconnect requested", "INFO")
         should_disconnect = True
@@ -1292,7 +1439,10 @@ class EKSRDisplayEnhanced:
                 error_type = type(e).__name__
                 log_to_terminal(f"Error disconnecting: {error_type}: {error_msg}", "ERROR")
         
-        log_to_terminal("Disconnected from FarDriver emulator", "INFO")
+        log_to_terminal("Disconnected from device", "INFO")
+        
+        # Clear connected device label
+        self.update_connected_device_label()
     
     def toggle_pause(self):
         """Toggle pause/resume of terminal logging and display updates"""
@@ -1813,7 +1963,7 @@ Index Distribution:
     
     def on_closing(self):
         """Handle window closing - disconnect and cleanup"""
-        global is_connected, should_disconnect, client
+        global is_connected, should_disconnect, client, ble_thread_running
         
         log_to_terminal("Application closing - disconnecting...", "INFO")
         
@@ -1847,6 +1997,9 @@ Index Distribution:
                 error_msg = str(e) if e else "Unknown error"
                 error_type = type(e).__name__
                 print(f"Error disconnecting: {error_type}: {error_msg}")
+        
+        # Stop BLE scanning thread
+        ble_thread_running = False
         
         # Destroy the window
         self.root.destroy()
@@ -2314,10 +2467,10 @@ def message_handler(data):
         log_to_terminal(f"Unknown packet type: {index}", "WARNING")
 
 async def scan_and_connect():
-    """Scan for and connect to FarDriver emulator"""
+    """Scan for and connect to FarDriver emulator or YuanQu device"""
     global client, is_connected, should_disconnect
     
-    log_to_terminal("Scanning for FarDriver emulator...", "INFO")
+    log_to_terminal("Scanning for FarDriver emulator or YuanQu device...", "INFO")
     
     while not should_disconnect:
         try:
@@ -2336,9 +2489,11 @@ async def scan_and_connect():
             devices = await BleakScanner.discover()
             
             for device in devices:
-                if device.name and "FarDriver" in device.name:
+                # Check for FarDriver or YuanQu devices
+                if device.name and ("FarDriver" in device.name or YUANQU_DEVICE_NAME in device.name):
+                    device_type = "FarDriver" if "FarDriver" in device.name else "YuanQu"
                     log_to_terminal(
-                        f"Found FarDriver device: {device.name} ({device.address})", "INFO"
+                        f"Found {device_type} device: {device.name} ({device.address})", "INFO"
                     )
                     
                     # Try to connect
@@ -2350,16 +2505,23 @@ async def scan_and_connect():
                         
                         if client.is_connected:
                             is_connected = True
-                            log_to_terminal("Connected to FarDriver emulator!", "SUCCESS")
+                            log_to_terminal(f"Connected to {device_type} device!", "SUCCESS")
+                            
+                            # Update connected device label
+                            if display_instance:
+                                display_instance.root.after(0, display_instance.update_connected_device_label, 
+                                                          device.name, device.address, device_type)
                             
                             # Wait a moment for services to be fully discovered
                             await asyncio.sleep(0.5)
                             
                             # Subscribe to notifications with retry
                             try:
-                                await client.start_notify(FARDRIVER_CHARACTERISTIC_UUID, 
+                                # Use appropriate characteristic UUID based on device type
+                                char_uuid = FARDRIVER_CHARACTERISTIC_UUID if device_type == "FarDriver" else YUANQU_CHARACTERISTIC_UUID
+                                await client.start_notify(char_uuid, 
                                                         lambda sender, data: message_handler(data))
-                                log_to_terminal("Successfully subscribed to FarDriver characteristic", "SUCCESS")
+                                log_to_terminal(f"Successfully subscribed to {device_type} characteristic", "SUCCESS")
                             except Exception as e:
                                 log_to_terminal(f"Failed to subscribe to characteristic: {e}", "ERROR")
                                 # Try to disconnect and let it retry
@@ -2375,11 +2537,17 @@ async def scan_and_connect():
                                 try:
                                     # Send keep-alive packet every 2 seconds
                                     keep_alive = bytes([0xAA, 0x13, 0xEC, 0x07, 0x01, 0xF1, 0xA2, 0x5D])
-                                    await client.write_gatt_char(FARDRIVER_CHARACTERISTIC_UUID, keep_alive)
+                                    char_uuid = FARDRIVER_CHARACTERISTIC_UUID if device_type == "FarDriver" else YUANQU_CHARACTERISTIC_UUID
+                                    await client.write_gatt_char(char_uuid, keep_alive)
                                     await asyncio.sleep(2)
                                 except Exception as e:
                                     log_to_terminal(f"Connection lost: {e}", "ERROR")
                                     is_connected = False
+                                    
+                                    # Clear connected device label
+                                    if display_instance:
+                                        display_instance.root.after(0, display_instance.update_connected_device_label)
+                                    
                                     break
                             
                             # If we should disconnect, break out of device loop
@@ -2415,7 +2583,7 @@ async def scan_and_connect():
 
 def run_ble_loop():
     """Run the BLE event loop in a separate thread"""
-    global should_disconnect, client, is_connected
+    global should_disconnect, client, is_connected, ble_thread_running
     
     while True:
         # Reset disconnect flag for new connection attempts
@@ -2450,16 +2618,21 @@ def run_ble_loop():
             # Wait until should_disconnect becomes False (user clicked Connect)
             while should_disconnect:
                 time.sleep(0.5)
+            
+            # If we're still supposed to disconnect, exit the loop
+            if should_disconnect:
+                log_to_terminal("BLE scanning stopped by user", "INFO")
+                ble_thread_running = False
+                break
 
 def main():
     """Main application entry point"""
-    # Start BLE scanning in background thread
-    ble_thread = threading.Thread(target=run_ble_loop, daemon=True)
-    ble_thread.start()
+    global display_instance
     
     # Create and run GUI
     root = tk.Tk()
     app = EKSRDisplayEnhanced(root)
+    display_instance = app  # Set global reference
     
     try:
         root.mainloop()
