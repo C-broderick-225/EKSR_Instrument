@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Installation script for EKSR Instrument PC Display Enhanced
+Installation script for FarDriver Monitor
 """
 
 import subprocess
@@ -16,7 +16,7 @@ def install_package(package):
         return False
 
 def main():
-    print("EKSR Instrument PC Display Enhanced - Installation")
+    print("FarDriver Monitor - Installation")
     print("=" * 50)
     
     # Core dependencies
@@ -55,7 +55,8 @@ def main():
     
     print("\n3. Installation complete!")
     print("\nTo run the application:")
-    print("   python pc_display_enhanced.py")
+    print("   python FarDriver_Monitor.py")
+    print("   or use the launcher: python run_enhanced.py")
     
     print("\nFeatures available:")
     print("   ✓ BLE communication and data display")

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-EKSR Instrument PC Display - Enhanced Version
+FarDriver Monitor
 A polished Python application that connects to the FarDriver BLE emulator and displays
-the EKSR Instrument data on a computer screen using tkinter with modern UI elements.
+the FarDriver data on a computer screen using tkinter with modern UI elements.
 
 This simulates the TFT display functionality without requiring the physical hardware.
 
@@ -751,10 +751,10 @@ class AnimatedGauge(tk.Canvas):
         else:
             return COLORS['error']
 
-class EKSRDisplayEnhanced:
+class FarDriverMonitor:
     def __init__(self, root):
         self.root = root
-        self.root.title("EKSR Instrument Display - Enhanced")
+        self.root.title("FarDriver Monitor")
         self.root.geometry("1200x800")
         self.root.configure(bg=COLORS['bg_dark'])
         self.root.minsize(1000, 700)
@@ -841,7 +841,7 @@ class EKSRDisplayEnhanced:
         title_frame = tk.Frame(self.sidebar, bg=COLORS['bg_medium'])
         title_frame.pack(fill='x', padx=10, pady=10)
         
-        tk.Label(title_frame, text="EKSR Instrument", 
+        tk.Label(title_frame, text="FarDriver Monitor", 
                 font=FONTS['title'], fg=COLORS['text_primary'], bg=COLORS['bg_medium']).pack()
         tk.Label(title_frame, text="Control Panel", 
                 font=FONTS['body'], fg=COLORS['text_secondary'], bg=COLORS['bg_medium']).pack()
@@ -1132,7 +1132,7 @@ class EKSRDisplayEnhanced:
     def update_terminal_filters(self):
         """Update terminal display based on filter settings"""
         # This will be called when checkboxes are toggled
-        # For now, we'll just log the current filter state
+        # For now, just log the current filter state
         active_filters = [key for key, var in self.terminal_filters.items() if var.get()]
         self.log_to_terminal(f"Terminal filters updated: {', '.join(active_filters)}", "INFO")
     
@@ -1341,7 +1341,7 @@ class EKSRDisplayEnhanced:
         self.status_bar.grid_propagate(False)
         
         # Status text
-        self.status_text = tk.Label(self.status_bar, text="EKSR Instrument Display v2.0", 
+        self.status_text = tk.Label(self.status_bar, text="FarDriver Monitor v2.0", 
                                   font=FONTS['body'], fg=COLORS['text_muted'], 
                                   bg=COLORS['bg_medium'])
         self.status_text.pack(side='left', padx=10, pady=2)
@@ -2344,7 +2344,7 @@ Index Distribution:
             settings['show_packet_details'] = self.show_packet_var.get()
             
             # Save to file
-            with open('eksr_settings.json', 'w') as f:
+            with open('FarDriver_Monitor_settings.json', 'w') as f:
                 json.dump(settings, f, indent=2)
             
             # Update UI to reflect new settings
@@ -2361,8 +2361,8 @@ Index Distribution:
     def load_settings(self):
         """Load settings from file"""
         try:
-            if os.path.exists('eksr_settings.json'):
-                with open('eksr_settings.json', 'r') as f:
+            if os.path.exists('FarDriver_Monitor_settings.json'):
+                with open('FarDriver_Monitor_settings.json', 'r') as f:
                     loaded_settings = json.load(f)
                     settings.update(loaded_settings)
                 self.log_to_terminal("Settings loaded from file", "INFO")
@@ -2575,7 +2575,7 @@ async def scan_and_connect():
         log_to_terminal("Retrying in 5 seconds...", "INFO")
         await asyncio.sleep(5)
     
-    # If we get here and should_disconnect is True, we're done
+    # If this point is reached and should_disconnect is True, scanning is done
     if should_disconnect:
         log_to_terminal("BLE scanning stopped due to disconnect request", "INFO")
     else:
@@ -2619,7 +2619,7 @@ def run_ble_loop():
             while should_disconnect:
                 time.sleep(0.5)
             
-            # If we're still supposed to disconnect, exit the loop
+            # If still supposed to disconnect, exit the loop
             if should_disconnect:
                 log_to_terminal("BLE scanning stopped by user", "INFO")
                 ble_thread_running = False
@@ -2631,7 +2631,7 @@ def main():
     
     # Create and run GUI
     root = tk.Tk()
-    app = EKSRDisplayEnhanced(root)
+    app = FarDriverMonitor(root)
     display_instance = app  # Set global reference
     
     try:

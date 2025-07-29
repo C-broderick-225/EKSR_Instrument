@@ -1,8 +1,8 @@
-# EKSR Instrument PC Display - Enhanced Version
+# FarDriver Monitor
 
 ## Overview
 
-This enhanced version of the EKSR Instrument PC Display provides a modern, polished interface with improved visual design, animations, and user experience.
+FarDriver Monitor provides a modern, polished interface with improved visual design, animations, and user experience for monitoring FarDriver BLE data.
 
 ## Key Enhancements
 
@@ -79,17 +79,17 @@ This enhanced version of the EKSR Instrument PC Display provides a modern, polis
 
 1. Install Python dependencies:
 ```bash
-pip install -r requirements_enhanced.txt
+pip install -r requirements_FarDriver_Monitor.txt
 ```
 
-2. Run the enhanced application:
+2. Run the FarDriver Monitor application:
 ```bash
-python pc_display_enhanced.py
+python FarDriver_Monitor.py
 ```
 
 ## Usage
 
-1. **Start the Application**: Launch the enhanced PC display
+1. **Start the Application**: Launch the FarDriver Monitor
 2. **Connect to Device**: The app will automatically scan for FarDriver devices
 3. **Monitor Data**: View real-time data through the various gauges and displays
 4. **Terminal Logging**: Monitor raw data packets in the terminal panel
@@ -107,9 +107,11 @@ pc_display/
 │   ├── eksr_data_20250725_143307.csv
 │   ├── eksr_data_20250725_143353.csv
 │   └── eksr_data_20250725_143400.json
-├── pc_display_enhanced.py         # Main application
-├── requirements_enhanced.txt      # Dependencies
-└── README.md                      # Documentation
+├── FarDriver_Monitor.py           # Main application
+├── requirements_FarDriver_Monitor.txt  # Dependencies
+├── run_FarDriver_Monitor.py       # Launcher script
+├── install_FarDriver_Monitor.py   # Installation script
+└── FarDriver_Monitor_README.md    # Documentation
 ```
 
 ### Data File Format
