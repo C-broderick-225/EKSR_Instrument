@@ -819,8 +819,11 @@ class FarDriverMonitor:
             # Try to set window icon (if available)
             if os.path.exists("icon.ico"):
                 self.root.iconbitmap("icon.ico")
-        except:
-            pass
+                print("Window icon set to icon.ico")
+            else:
+                print("Warning: icon.ico not found - using default icon")
+        except Exception as e:
+            print(f"Warning: Could not set window icon: {e}")
         
         # Configure ttk styles
         style = ttk.Style()

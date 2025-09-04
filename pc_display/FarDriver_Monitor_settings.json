@@ -8,5 +8,6 @@
   "record_interval": 1.0,
   "show_performance": true,
   "show_packet_details": true,
-  "theme": "dark"
+  "theme": "purple",
+  "sidebar_width": 315
 }
